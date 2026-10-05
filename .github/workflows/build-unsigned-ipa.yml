@@ -1,0 +1,50 @@
+name: Build R2 Follow unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build unsigned iPhone app
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project R2Follow.xcodeproj \
+            -scheme R2Follow \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA for Sideloadly
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release-iphoneos/R2 Follow.app"
+          test -d "$APP"
+          rm -rf Payload R2_Follow_Unsigned.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/
+          /usr/bin/zip -qry R2_Follow_Unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: R2-Follow-Unsigned-IPA
+          path: R2_Follow_Unsigned.ipa
+          if-no-files-found: error
