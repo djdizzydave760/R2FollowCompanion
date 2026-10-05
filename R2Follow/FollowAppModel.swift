@@ -20,6 +20,7 @@ final class FollowAppModel: ObservableObject {
 
     let motion = MotionTracker()
     let bridge = MacBridge()
+    let voice = VoiceCommandListener()
 
     private var sessionID = UUID().uuidString
     private var sendTimer: Timer?
@@ -37,6 +38,16 @@ final class FollowAppModel: ObservableObject {
         bridge.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+        voice.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
+        voice.onCommand = { [weak self] command in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.handleVoiceCommand(command)
+            }
+        }
     }
 
     func syncBridgeSettings() {
@@ -47,6 +58,69 @@ final class FollowAppModel: ObservableObject {
 
     func requestPermissions() {
         motion.requestPermissions()
+    }
+
+    func startVoiceCommands() async {
+        syncBridgeSettings()
+        await voice.start()
+        if voice.isListening {
+            status = "VOICE COMMANDS ON • say “R2 …”"
+        } else {
+            status = voice.permissionStatus
+        }
+    }
+
+    func stopVoiceCommands() {
+        voice.stop()
+        status = "Voice commands off"
+    }
+
+    private func handleVoiceCommand(_ command: R2VoiceCommand) async {
+        syncBridgeSettings()
+
+        do {
+            switch command {
+            case .speak:
+                try await bridge.chirp()
+                status = "VOICE • R2 speak"
+
+            case .think:
+                try await bridge.reaction("Curious")
+                status = "VOICE • R2 what do you think"
+
+            case .spin:
+                try await bridge.spin()
+                status = "VOICE • R2 spin"
+
+            case .hello:
+                try await bridge.reaction("Greeting")
+                status = "VOICE • R2 hello"
+
+            case .excited:
+                try await bridge.reaction("Excited")
+                status = "VOICE • R2 get excited"
+
+            case .center:
+                try await bridge.centerDome()
+                status = "VOICE • R2 center"
+
+            case .follow:
+                await startFollow()
+
+            case .stopFollowing:
+                await stopFollow()
+
+            case .stop:
+                await emergencyStop()
+            }
+
+            if command != .follow && command != .stopFollowing && command != .stop {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        } catch {
+            status = "Voice command failed: \(error.localizedDescription)"
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        }
     }
 
     func calibrate() {
