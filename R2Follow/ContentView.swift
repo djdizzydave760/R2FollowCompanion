@@ -29,7 +29,6 @@ struct ContentView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .onAppear {
                 model.syncBridgeSettings()
-                model.requestPermissions()
             }
         }
     }
@@ -79,6 +78,14 @@ struct ContentView: View {
 
     private var setupCard: some View {
         card("CALIBRATE", icon: "safari") {
+            Text("First tap Enable iPhone Sensors and approve the iOS prompts. Then calibrate with R2 behind you, both facing the same direction.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Button("Enable iPhone Sensors") {
+                model.requestPermissions()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.blue)
             Text("1. Put R2 4–6 ft behind you and point R2 in the same direction you are facing.\n2. Hold the iPhone upright with the top edge pointing forward.\n3. Tap Calibrate.\n4. Put the phone into your pocket in a consistent top-up orientation.\n5. Tap Start Follow and walk slowly.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
