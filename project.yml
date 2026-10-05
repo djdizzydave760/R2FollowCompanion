@@ -29,4 +29,6 @@ targets:
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "R2 Follow communicates with Droid Control running on your Mac over your private local network."
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "R2 Follow listens for optional hands-free commands such as R2 speak, R2 spin, and R2 stop while the app is open."
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "R2 Follow uses speech recognition to recognize optional R2 voice commands spoken into your iPhone."
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: "R2 Follow uses Bluetooth to connect directly to your personal Droid Depot R-Series droid."
+        INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription: "R2 Follow uses Bluetooth to control your personal Droid Depot R-Series droid."
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
