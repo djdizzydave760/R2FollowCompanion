@@ -13,13 +13,20 @@
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
+  <string>1.0.1</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>2</string>
   <key>LSRequiresIPhoneOS</key>
   <true/>
   <key>UILaunchScreen</key>
   <dict/>
+  <key>UIApplicationSceneManifest</key>
+  <dict>
+    <key>UIApplicationSupportsMultipleScenes</key>
+    <false/>
+    <key>UISceneConfigurations</key>
+    <dict/>
+  </dict>
   <key>NSMotionUsageDescription</key>
   <string>R2 Follow uses your iPhone motion and walking distance to estimate a delayed route for your personal R-Series droid.</string>
   <key>NSLocationWhenInUseUsageDescription</key>
