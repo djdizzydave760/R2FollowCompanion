@@ -11,6 +11,7 @@ struct ContentView: View {
                     hero
                     connectionCard
                     setupCard
+                    voiceCard
                     followCard
                     telemetryCard
                     safetyCard
@@ -99,6 +100,46 @@ struct ContentView: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.cyan)
             }
+        }
+    }
+
+    private var voiceCard: some View {
+        card("R2 VOICE COMMANDS", icon: "mic.fill") {
+            Text("Hands-free commands use the iPhone microphone while this app is open. Commands only trigger when R2 is heard first.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if model.voice.isListening {
+                Button(role: .destructive) {
+                    model.stopVoiceCommands()
+                } label: {
+                    Label("Stop Voice Commands", systemImage: "mic.slash.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                Button {
+                    Task { await model.startVoiceCommands() }
+                } label: {
+                    Label("Start Voice Commands", systemImage: "mic.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.purple)
+            }
+
+            metric("Microphone", model.voice.isListening ? "Listening" : "Off")
+            metric("Heard", model.voice.transcript)
+            metric("Last command", model.voice.lastCommand)
+
+            Text(model.voice.permissionStatus)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("Try: “R2 speak” • “R2 what do you think” • “R2 spin” • “R2 hello” • “R2 get excited” • “R2 center” • “R2 follow me” • “R2 stop following” • “R2 stop”")
+                .font(.caption)
+                .foregroundStyle(.cyan)
+                .textSelection(.enabled)
         }
     }
 
