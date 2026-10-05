@@ -24,4 +24,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "R2 Follow uses compass heading while the app is open to estimate turns in your walking route."
+        INFOPLIST_KEY_NSMotionUsageDescription: "R2 Follow uses motion and walking distance to estimate a delayed route for your personal R-Series droid."
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "R2 Follow communicates with Droid Control running on your Mac over your private local network."
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
