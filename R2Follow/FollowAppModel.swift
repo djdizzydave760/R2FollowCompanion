@@ -208,7 +208,7 @@ final class FollowAppModel: ObservableObject {
         case .speak:
             directBLE.chirp()
         case .think:
-            directBLE.scan()
+            directBLE.scanArea()
         case .hello:
             directBLE.greeting()
         case .happy:
@@ -229,7 +229,7 @@ final class FollowAppModel: ObservableObject {
         case .center:
             directBLE.centerDome()
         case .scan:
-            directBLE.scan()
+            directBLE.scanArea()
         case .turnLeft:
             directBLE.turnLeftPulse()
         case .turnRight:
