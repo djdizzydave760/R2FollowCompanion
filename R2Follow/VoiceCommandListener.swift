@@ -134,6 +134,27 @@ final class VoiceCommandListener: ObservableObject {
 
             let newRequest = SFSpeechAudioBufferRecognitionRequest()
             newRequest.shouldReportPartialResults = true
+            newRequest.taskHint = .confirmation
+            newRequest.contextualStrings = [
+                "R2", "R two", "Artoo",
+                "R2 speak", "R2 hello", "R2 what do you think",
+                "R2 be happy", "R2 get excited", "R2 alert",
+                "R2 go to sleep", "R2 wake up",
+                "R2 look left", "R2 look right", "R2 center",
+                "R2 scan the area", "R2 turn left", "R2 turn right",
+                "R2 spin left", "R2 spin right", "R2 dance",
+                "R2 lights on", "R2 lights off",
+                "R2 resistance", "R2 first order", "R2 droid depot",
+                "R2 follow me", "R2 stop following", "R2 stop"
+            ]
+
+            if recognizer.supportsOnDeviceRecognition {
+                newRequest.requiresOnDeviceRecognition = true
+                permissionStatus = "Microphone + on-device speech recognition ready"
+            } else {
+                permissionStatus = "Microphone ready • speech recognition may require internet"
+            }
+
             request = newRequest
 
             let input = audioEngine.inputNode
