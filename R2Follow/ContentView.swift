@@ -136,10 +136,20 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Text("Try: “R2 speak” • “R2 what do you think” • “R2 spin” • “R2 hello” • “R2 get excited” • “R2 center” • “R2 follow me” • “R2 stop following” • “R2 stop”")
-                .font(.caption)
-                .foregroundStyle(.cyan)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("VOICE COMMANDS")
+                    .font(.caption.monospaced().bold())
+                    .foregroundStyle(.cyan)
+                Text("Personality: R2 speak • R2 hello • R2 what do you think • R2 be happy • R2 get excited • R2 alert • R2 go to sleep • R2 wake up")
+                Text("Dome: R2 look left • R2 look right • R2 center • R2 scan the area")
+                Text("Movement: R2 turn left • R2 turn right • R2 spin left • R2 spin right • R2 dance")
+                Text("Lights: R2 lights on • R2 lights off")
+                Text("Batuu: R2 resistance • R2 first order • R2 droid depot")
+                Text("Follow: R2 follow me • R2 stop following • R2 stop")
+            }
+            .font(.caption)
+            .foregroundStyle(.cyan)
+            .textSelection(.enabled)
         }
     }
 
