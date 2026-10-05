@@ -154,8 +154,19 @@ final class FollowAppModel: ObservableObject {
                 motion.heading
             )
         } catch {
-            status = "Telemetry error — stopping for safety"
-            await emergencyStop()
+            let detail = error.localizedDescription
+
+            sendTimer?.invalidate()
+            sendTimer = nil
+            motion.stopTracking()
+            isFollowing = false
+            UIApplication.shared.isIdleTimerDisabled = false
+
+            // Preserve the actual network/server error instead of overwriting it
+            // with a generic emergency-stop message. R2 is still stopped for safety.
+            await bridge.emergencyStop()
+            status = "Telemetry stopped: \(detail)"
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
         }
     }
 }
