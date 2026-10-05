@@ -88,21 +88,85 @@ final class FollowAppModel: ObservableObject {
                 try await bridge.reaction("Curious")
                 status = "VOICE • R2 what do you think"
 
-            case .spin:
-                try await bridge.spin()
-                status = "VOICE • R2 spin"
-
             case .hello:
                 try await bridge.reaction("Greeting")
                 status = "VOICE • R2 hello"
+
+            case .happy:
+                try await bridge.reaction("Happy")
+                status = "VOICE • R2 be happy"
 
             case .excited:
                 try await bridge.reaction("Excited")
                 status = "VOICE • R2 get excited"
 
+            case .alert:
+                try await bridge.reaction("Alert")
+                status = "VOICE • R2 alert"
+
+            case .sleep:
+                try await bridge.reaction("Sleep")
+                status = "VOICE • R2 go to sleep"
+
+            case .wake:
+                try await bridge.action("wake")
+                status = "VOICE • R2 wake up"
+
+            case .lookLeft:
+                try await bridge.action("look-left")
+                status = "VOICE • R2 look left"
+
+            case .lookRight:
+                try await bridge.action("look-right")
+                status = "VOICE • R2 look right"
+
             case .center:
                 try await bridge.centerDome()
                 status = "VOICE • R2 center"
+
+            case .scan:
+                try await bridge.action("scan")
+                status = "VOICE • R2 scan the area"
+
+            case .turnLeft:
+                try await bridge.action("turn-left")
+                status = "VOICE • R2 turn left"
+
+            case .turnRight:
+                try await bridge.action("turn-right")
+                status = "VOICE • R2 turn right"
+
+            case .spinLeft:
+                try await bridge.action("spin-left")
+                status = "VOICE • R2 spin left"
+
+            case .spinRight:
+                try await bridge.spin()
+                status = "VOICE • R2 spin right"
+
+            case .dance:
+                try await bridge.action("dance")
+                status = "VOICE • R2 dance"
+
+            case .lightsOn:
+                try await bridge.action("lights/on")
+                status = "VOICE • R2 lights on"
+
+            case .lightsOff:
+                try await bridge.action("lights/off")
+                status = "VOICE • R2 lights off"
+
+            case .resistance:
+                try await bridge.runScript(3)
+                status = "VOICE • Resistance response"
+
+            case .firstOrder:
+                try await bridge.runScript(7)
+                status = "VOICE • First Order response"
+
+            case .droidDepot:
+                try await bridge.runScript(2)
+                status = "VOICE • Droid Depot response"
 
             case .follow:
                 await startFollow()
