@@ -6,10 +6,31 @@ import Combine
 enum R2VoiceCommand: String {
     case speak = "R2 speak"
     case think = "R2 what do you think"
-    case spin = "R2 spin"
     case hello = "R2 hello"
+    case happy = "R2 be happy"
     case excited = "R2 get excited"
+    case alert = "R2 alert"
+    case sleep = "R2 go to sleep"
+    case wake = "R2 wake up"
+
+    case lookLeft = "R2 look left"
+    case lookRight = "R2 look right"
     case center = "R2 center"
+    case scan = "R2 scan the area"
+
+    case turnLeft = "R2 turn left"
+    case turnRight = "R2 turn right"
+    case spinLeft = "R2 spin left"
+    case spinRight = "R2 spin right"
+    case dance = "R2 dance"
+
+    case lightsOn = "R2 lights on"
+    case lightsOff = "R2 lights off"
+
+    case resistance = "R2 resistance"
+    case firstOrder = "R2 first order"
+    case droidDepot = "R2 droid depot"
+
     case follow = "R2 follow me"
     case stopFollowing = "R2 stop following"
     case stop = "R2 stop"
@@ -159,29 +180,67 @@ final class VoiceCommandListener: ObservableObject {
 
     private func handleTranscript(_ raw: String) {
         let text = normalize(raw)
-        guard text.contains("r2") || text.contains("r two") || text.contains("artoo") else {
+        guard text.contains("r2") ||
+              text.contains("r two") ||
+              text.contains("are two") ||
+              text.contains("r too") ||
+              text.contains("artoo") else {
             return
         }
 
         let command: R2VoiceCommand?
 
-        if containsAny(text, ["stop following", "stop follow"]) {
+        // Most specific phrases first so "spin left" is not mistaken for "turn left",
+        // and "stop following" is not mistaken for the emergency-stop command.
+        if containsAny(text, ["stop following", "stop follow", "quit following"]) {
             command = .stopFollowing
-        } else if containsAny(text, ["what do you think", "what you think"]) {
+        } else if containsAny(text, ["spin left", "spin counter clockwise", "spin counterclockwise"]) {
+            command = .spinLeft
+        } else if containsAny(text, ["spin right", "spin clockwise", "spin", "turn around"]) {
+            command = .spinRight
+        } else if containsAny(text, ["look left", "head left", "dome left"]) {
+            command = .lookLeft
+        } else if containsAny(text, ["look right", "head right", "dome right"]) {
+            command = .lookRight
+        } else if containsAny(text, ["scan the area", "scan area", "look around", "take a look around"]) {
+            command = .scan
+        } else if containsAny(text, ["turn left", "rotate left"]) {
+            command = .turnLeft
+        } else if containsAny(text, ["turn right", "rotate right"]) {
+            command = .turnRight
+        } else if containsAny(text, ["dance", "do a dance", "show me your moves"]) {
+            command = .dance
+        } else if containsAny(text, ["lights on", "turn your lights on", "turn lights on"]) {
+            command = .lightsOn
+        } else if containsAny(text, ["lights off", "turn your lights off", "turn lights off"]) {
+            command = .lightsOff
+        } else if containsAny(text, ["go to sleep", "go to bed", "sleep"]) {
+            command = .sleep
+        } else if containsAny(text, ["wake up", "wake", "good morning"]) {
+            command = .wake
+        } else if containsAny(text, ["first order"]) {
+            command = .firstOrder
+        } else if containsAny(text, ["resistance", "rebel", "rebellion"]) {
+            command = .resistance
+        } else if containsAny(text, ["droid depot", "batuu droid depot"]) {
+            command = .droidDepot
+        } else if containsAny(text, ["what do you think", "what you think", "are you curious"]) {
             command = .think
-        } else if containsAny(text, ["get excited", "be excited"]) {
+        } else if containsAny(text, ["be happy", "happy", "are you happy"]) {
+            command = .happy
+        } else if containsAny(text, ["get excited", "be excited", "excited"]) {
             command = .excited
+        } else if containsAny(text, ["alert", "watch out", "danger"]) {
+            command = .alert
         } else if containsAny(text, ["follow me", "start following"]) {
             command = .follow
-        } else if containsAny(text, ["speak", "say something", "talk"]) {
+        } else if containsAny(text, ["speak", "say something", "talk", "beep", "chirp"]) {
             command = .speak
-        } else if containsAny(text, ["spin", "turn around"]) {
-            command = .spin
-        } else if containsAny(text, ["hello", "say hello", "hi r2"]) {
+        } else if containsAny(text, ["hello", "say hello", "hi r2", "greet me"]) {
             command = .hello
-        } else if containsAny(text, ["center", "center your head", "center dome"]) {
+        } else if containsAny(text, ["center", "center your head", "center dome", "look forward"]) {
             command = .center
-        } else if containsAny(text, ["stop", "emergency stop", "freeze"]) {
+        } else if containsAny(text, ["stop", "emergency stop", "freeze", "hold it"]) {
             command = .stop
         } else {
             command = nil
