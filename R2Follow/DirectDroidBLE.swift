@@ -413,7 +413,7 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         schedule(after: 0.48, generation: generation) { [weak self] in self?.stopDome() }
     }
 
-    func scan() {
+    func scanArea() {
         let generation = beginTimedAction()
         domeLeft(speed: 75)
         schedule(after: 0.45, generation: generation) { [weak self] in
