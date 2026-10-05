@@ -78,6 +78,31 @@ final class MacBridge: ObservableObject {
         }
     }
 
+    func chirp() async throws {
+        _ = try await request(path: "/action/chirp", method: "POST", body: Data())
+        reachable = true
+        lastMessage = "R2 spoke"
+    }
+
+    func reaction(_ name: String) async throws {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        _ = try await request(path: "/reaction/\(encoded)", method: "POST", body: Data())
+        reachable = true
+        lastMessage = "R2 reaction: \(name)"
+    }
+
+    func spin() async throws {
+        _ = try await request(path: "/action/spin", method: "POST", body: Data())
+        reachable = true
+        lastMessage = "R2 spin"
+    }
+
+    func centerDome() async throws {
+        _ = try await request(path: "/action/center", method: "POST", body: Data())
+        reachable = true
+        lastMessage = "R2 dome centered"
+    }
+
     private func request(path: String, method: String, body: Data?) async throws -> Data {
         guard let baseURL else { throw BridgeError.invalidAddress }
         let url = baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
