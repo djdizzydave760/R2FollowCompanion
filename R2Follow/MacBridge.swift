@@ -103,6 +103,19 @@ final class MacBridge: ObservableObject {
         lastMessage = "R2 dome centered"
     }
 
+    func action(_ name: String) async throws {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        _ = try await request(path: "/action/\(encoded)", method: "POST", body: Data())
+        reachable = true
+        lastMessage = "R2 action: \(name)"
+    }
+
+    func runScript(_ id: Int) async throws {
+        _ = try await request(path: "/script/\(id)", method: "POST", body: Data())
+        reachable = true
+        lastMessage = "R2 script \(id)"
+    }
+
     private func request(path: String, method: String, body: Data?) async throws -> Data {
         guard let baseURL else { throw BridgeError.invalidAddress }
         let url = baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
