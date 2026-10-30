@@ -5,6 +5,7 @@ import Combine
 final class DirectShadowFollowController: ObservableObject {
     private struct Segment {
         let readyAt: Date
+        let releaseAtPathDistance: Double
         let distanceDeltaMeters: Double
         let targetHeading: Double
     }
@@ -14,56 +15,67 @@ final class DirectShadowFollowController: ObservableObject {
     @Published private(set) var filteredHeading = 0.0
     @Published private(set) var headingError = 0.0
     @Published private(set) var queuedDistance = 0.0
+    @Published private(set) var trackingQuality = "WAITING"
+
+    // Master switch used by the shared personality engine.
     @Published var personalityEnabled = true
-    @Published var turnCorrectionEnabled = false
+
+    // Hybrid Follow steering. GPS course is the primary turning source.
+    @Published var turnCorrectionEnabled = true
+
+    // Kept under the original property name for backwards compatibility with
+    // existing UI/state. It now represents the calibrated ~3.5 ft RSSI point.
     @Published var twoFootRSSI: Double?
     @Published private(set) var proximityState = "NOT CALIBRATED"
 
-    // Live calibration controls. These can be adjusted from the iPhone before Follow.
-    @Published var shadowDelay = 0.35
-    @Published var driveSpeed = 92.0
-    @Published var turnSpeed = 66.0
-    @Published var minimumDistanceMeters = 0.04
-    @Published var secondsPerMeter = 3.10
-    @Published var turnDegreesPerSecond = 92.0
-    @Published var turnDeadbandDegrees = 18.0
+    // Live tuning controls.
+    @Published var shadowDelay = 0.18
+    @Published var trailDistanceMeters = 1.05
+    @Published var driveSpeed = 88.0
+    @Published var turnSpeed = 60.0
+    @Published var minimumDistanceMeters = 0.05
+    @Published var secondsPerMeter = 2.85
+    @Published var turnDegreesPerSecond = 90.0
+    @Published var turnDeadbandDegrees = 16.0
     @Published var maxHeadingAccuracy = 35.0
-    @Published var headingSmoothing = 0.22
-    @Published var maxDrivePulse = 0.32
-    @Published var maxTurnPulse = 0.22
+    @Published var headingSmoothing = 0.16
+    @Published var maxDrivePulse = 0.28
+    @Published var maxTurnPulse = 0.18
 
     private let droid: DirectDroidBLE
-    private var referenceHeading = 0.0
+
+    private var pathReferenceCourse: Double?
     private var estimatedDroidHeading = 0.0
     private var latestTargetHeading = 0.0
     private var lastQueuedHeading = 0.0
     private var lastTotalDistance = 0.0
+    private var currentPhonePathDistance = 0.0
     private var accumulatedDistance = 0.0
     private var queue: [Segment] = []
     private var processingTimer: Timer?
     private var executing = false
     private var hasFilteredHeading = false
-    private var nextChirpAt = Date.distantFuture
-    private var nextLightAt = Date.distantFuture
     private var proximityHolding = false
+    private var lastGoodCourseAt = Date.distantPast
 
     init(droid: DirectDroidBLE) {
         self.droid = droid
     }
 
     func resetRecommendedCalibration() {
-        shadowDelay = 0.35
-        driveSpeed = 92
-        turnSpeed = 66
-        minimumDistanceMeters = 0.04
-        secondsPerMeter = 3.10
-        turnDegreesPerSecond = 92
-        turnDeadbandDegrees = 18
+        shadowDelay = 0.18
+        trailDistanceMeters = 1.05
+        driveSpeed = 88
+        turnSpeed = 60
+        minimumDistanceMeters = 0.05
+        secondsPerMeter = 2.85
+        turnDegreesPerSecond = 90
+        turnDeadbandDegrees = 16
         maxHeadingAccuracy = 35
-        headingSmoothing = 0.22
-        maxDrivePulse = 0.32
-        maxTurnPulse = 0.22
-        turnCorrectionEnabled = false
+        headingSmoothing = 0.16
+        maxDrivePulse = 0.28
+        maxTurnPulse = 0.18
+        turnCorrectionEnabled = true
     }
 
     func calibrateTwoFootStop(usingRSSI rssi: Double) {
@@ -73,7 +85,10 @@ final class DirectShadowFollowController: ObservableObject {
         }
 
         twoFootRSSI = rssi
-        proximityState = String(format: "2 FT SET • %.0f dBm", rssi)
+        proximityState = String(
+            format: "3.5 FT TARGET SET • %.0f dBm",
+            rssi
+        )
     }
 
     func clearTwoFootStop() {
@@ -81,34 +96,17 @@ final class DirectShadowFollowController: ObservableObject {
         proximityState = "NOT CALIBRATED"
     }
 
-    private func isInsideStopDistance() -> Bool {
-        guard let twoFootRSSI else { return false }
-        let current = droid.smoothedRSSI
-        guard current < 0, current > -120 else { return false }
-
-        // RSSI becomes less negative as the phone gets closer. A small margin
-        // prevents rapid stop/start chatter around the calibration point.
-        return current >= twoFootRSSI - 1.5
-    }
-
-    private func isClearlyOutsideStopDistance() -> Bool {
-        guard let twoFootRSSI else { return true }
-        let current = droid.smoothedRSSI
-        guard current < 0, current > -120 else { return true }
-
-        // Hysteresis: R2 must fall several dB farther away before resuming.
-        return current <= twoFootRSSI - 4.0
-    }
-
     func setReferenceHeading(_ heading: Double) {
-        referenceHeading = normalized360(heading)
+        // Legacy/manual alignment remains available, but Hybrid Follow normally
+        // learns its reference from the first reliable GPS course while walking.
+        pathReferenceCourse = normalized360(heading)
         estimatedDroidHeading = 0
         latestTargetHeading = 0
         lastQueuedHeading = 0
         filteredHeading = 0
         headingError = 0
         hasFilteredHeading = false
-        state = "R2 FORWARD HEADING ALIGNED"
+        state = "PATH HEADING ALIGNED"
     }
 
     func start(initialHeading: Double) {
@@ -119,91 +117,121 @@ final class DirectShadowFollowController: ObservableObject {
             return
         }
 
-        setReferenceHeading(initialHeading)
+        pathReferenceCourse = nil
+        estimatedDroidHeading = 0
+        latestTargetHeading = 0
+        lastQueuedHeading = 0
         lastTotalDistance = 0
+        currentPhonePathDistance = 0
         accumulatedDistance = 0
         queuedDistance = 0
         queue.removeAll()
         executing = false
-        isActive = true
-        state = "FOLLOWING / WAITING FOR STEPS"
-        nextChirpAt = Date().addingTimeInterval(2.5)
-        nextLightAt = Date().addingTimeInterval(0.6)
+        hasFilteredHeading = false
         proximityHolding = false
+        lastGoodCourseAt = .distantPast
 
-        if personalityEnabled {
-            droid.setAllHeadLEDs(on: true)
-            droid.expressiveChirp(bank: 1)
-        }
+        isActive = true
+        state = "HYBRID FOLLOW / WALK FORWARD"
+        trackingQuality = "WAITING FOR GPS COURSE"
 
-        processingTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+        processingTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.05,
+            repeats: true
+        ) { [weak self] _ in
             self?.tick()
         }
     }
 
     func accept(
         totalDistanceMeters: Double,
-        headingDegrees: Double,
-        headingAccuracy: Double,
+        gpsCourseDegrees: Double,
+        gpsCourseValid: Bool,
         moving: Bool
     ) {
         guard isActive, droid.isConnected else { return }
 
-        if !turnCorrectionEnabled, twoFootRSSI != nil {
-            // Pure Bluetooth proximity mode: no compass or pedometer steering.
-            return
-        }
-
         let total = max(0, totalDistanceMeters)
         let delta = max(0, min(1.0, total - lastTotalDistance))
         lastTotalDistance = total
-
-        let headingUsable =
-            headingAccuracy >= 0 &&
-            headingAccuracy <= maxHeadingAccuracy &&
-            headingDegrees.isFinite
+        currentPhonePathDistance = total
 
         var targetHeading = latestTargetHeading
 
-        if headingUsable {
-            let rawRelative = shortestAngle(normalized360(headingDegrees) - referenceHeading)
+        if turnCorrectionEnabled,
+           gpsCourseValid,
+           moving,
+           gpsCourseDegrees >= 0,
+           gpsCourseDegrees < 360 {
 
-            if !hasFilteredHeading {
-                filteredHeading = rawRelative
+            let course = normalized360(gpsCourseDegrees)
+
+            if pathReferenceCourse == nil {
+                pathReferenceCourse = course
+                filteredHeading = 0
+                latestTargetHeading = 0
+                lastQueuedHeading = 0
                 hasFilteredHeading = true
-            } else {
-                filteredHeading = circularBlend(
-                    from: filteredHeading,
-                    to: rawRelative,
-                    alpha: headingSmoothing
-                )
-            }
+                trackingQuality = "GPS COURSE LOCKED"
+                lastGoodCourseAt = Date()
+            } else if let reference = pathReferenceCourse {
+                let rawRelative = shortestAngle(course - reference)
 
-            // Ignore impossible single-sample compass jumps. A real walking turn
-            // will continue arriving and the filtered value will catch up smoothly.
-            let jump = shortestAngle(filteredHeading - lastQueuedHeading)
-            let limitedJump = max(-35.0, min(35.0, jump))
-            targetHeading = shortestAngle(lastQueuedHeading + limitedJump)
+                if !hasFilteredHeading {
+                    filteredHeading = rawRelative
+                    hasFilteredHeading = true
+                } else {
+                    filteredHeading = circularBlend(
+                        from: filteredHeading,
+                        to: rawRelative,
+                        alpha: headingSmoothing
+                    )
+                }
+
+                // Prevent a single GPS sample from asking for a huge pivot.
+                // Real turns persist across several samples and naturally catch up.
+                let jump = shortestAngle(
+                    filteredHeading - lastQueuedHeading
+                )
+                let limitedJump = max(-22.0, min(22.0, jump))
+                targetHeading = shortestAngle(
+                    lastQueuedHeading + limitedJump
+                )
+
+                lastGoodCourseAt = Date()
+                trackingQuality = "GPS + MOTION"
+            }
+        } else if turnCorrectionEnabled {
+            let age = Date().timeIntervalSince(lastGoodCourseAt)
+            trackingQuality =
+                age < 2.0
+                ? "COASTING ON LAST GOOD COURSE"
+                : "GPS COURSE WEAK • NO NEW TURN"
+        } else {
+            trackingQuality = "STRAIGHT PROXIMITY MODE"
         }
 
-        let headingChange = abs(shortestAngle(targetHeading - lastQueuedHeading))
+        let headingChange = abs(
+            shortestAngle(targetHeading - lastQueuedHeading)
+        )
 
-        // Always record real forward progress quickly.
         let hasForwardProgress = delta >= 0.01
-
-        // A heading-only segment is accepted only while the phone says the user
-        // is actually moving. This prevents pocket compass wobble from making R2
-        // spin in circles while standing still.
         let hasMeaningfulTurn =
             turnCorrectionEnabled &&
             moving &&
-            headingUsable &&
+            gpsCourseValid &&
             headingChange >= turnDeadbandDegrees
 
         if hasForwardProgress || hasMeaningfulTurn {
+            let releaseDistance =
+                total + max(0.60, trailDistanceMeters)
+
             queue.append(
                 Segment(
-                    readyAt: Date().addingTimeInterval(max(0.10, shadowDelay)),
+                    readyAt: Date().addingTimeInterval(
+                        max(0.05, shadowDelay)
+                    ),
+                    releaseAtPathDistance: releaseDistance,
                     distanceDeltaMeters: delta,
                     targetHeading: targetHeading
                 )
@@ -213,13 +241,16 @@ final class DirectShadowFollowController: ObservableObject {
                 lastQueuedHeading = targetHeading
             }
 
-            if queue.count > 70 {
-                queue.removeFirst(queue.count - 70)
+            if queue.count > 100 {
+                queue.removeFirst(queue.count - 100)
             }
         }
     }
 
-    func stop(reason: String = "Stopped", updateState: Bool = true) {
+    func stop(
+        reason: String = "Stopped",
+        updateState: Bool = true
+    ) {
         processingTimer?.invalidate()
         processingTimer = nil
         queue.removeAll()
@@ -247,8 +278,8 @@ final class DirectShadowFollowController: ObservableObject {
             return
         }
 
-        performPersonalityIfNeeded()
-
+        // Bluetooth is only the close-range spacing brake. GPS/course decides
+        // the path direction.
         if twoFootRSSI != nil {
             if proximityHolding {
                 if isClearlyOutsideStopDistance() {
@@ -256,29 +287,35 @@ final class DirectShadowFollowController: ObservableObject {
                     proximityState = "PHONE MOVED AWAY • RESUMING"
                 } else {
                     droid.stopDrive()
-                    state = "HOLDING • ABOUT 2 FT"
-                    proximityState = "HOLDING NEAR 2 FT"
+                    state = "HOLDING • ~3–4 FT"
+                    proximityState = "HOLDING TARGET GAP"
                     return
                 }
             } else if isInsideStopDistance() {
                 proximityHolding = true
                 droid.stopDrive()
-                state = "HOLDING • ABOUT 2 FT"
-                proximityState = "HOLDING NEAR 2 FT"
+                state = "HOLDING • ~3–4 FT"
+                proximityState = "HOLDING TARGET GAP"
                 return
             } else {
-                proximityState = "PHONE FARTHER THAN STOP POINT"
+                proximityState = "PHONE AHEAD • FOLLOWING"
             }
         }
 
         guard !executing else { return }
 
         if !turnCorrectionEnabled, twoFootRSSI != nil {
-            performProximityForwardPulse()
+            performStraightProximityPulse()
             return
         }
 
-        while let first = queue.first, first.readyAt <= Date() {
+        // Release breadcrumbs only after the phone is about 3–4 ft farther down
+        // the recorded walking path. This makes R2 replay the path behind you
+        // instead of chasing your current phone heading.
+        while let first = queue.first,
+              first.readyAt <= Date(),
+              currentPhonePathDistance >= first.releaseAtPathDistance {
+
             queue.removeFirst()
             accumulatedDistance += first.distanceDeltaMeters
             latestTargetHeading = first.targetHeading
@@ -286,12 +323,13 @@ final class DirectShadowFollowController: ObservableObject {
 
         queuedDistance = accumulatedDistance
 
-        let difference = shortestAngle(latestTargetHeading - estimatedDroidHeading)
+        let difference = shortestAngle(
+            latestTargetHeading - estimatedDroidHeading
+        )
         headingError = difference
 
-        // Drive first when heading is already reasonably close. Only pivot when
-        // the error is outside the deadband. This dramatically reduces circling.
-        if turnCorrectionEnabled && abs(difference) >= turnDeadbandDegrees {
+        if turnCorrectionEnabled &&
+           abs(difference) >= turnDeadbandDegrees {
             performTurn(difference)
             return
         }
@@ -301,33 +339,41 @@ final class DirectShadowFollowController: ObservableObject {
             return
         }
 
-        state = queue.isEmpty ? "FOLLOWING / WAITING" : "FOLLOWING / TRAIL BUFFER"
+        state =
+            queue.isEmpty
+            ? "HYBRID FOLLOW / HOLDING PATH"
+            : "HYBRID FOLLOW / TRAIL BUFFER"
     }
 
-    private func performProximityForwardPulse() {
-        guard let twoFootRSSI else { return }
+    private func performStraightProximityPulse() {
+        guard let targetRSSI = twoFootRSSI else { return }
 
         let current = droid.smoothedRSSI
+
         guard current < 0, current > -120 else {
             state = "PROXIMITY / WAITING FOR SIGNAL"
             return
         }
 
-        let gapDB = max(0, twoFootRSSI - current)
-
-        // Farther signal = slightly longer catch-up pulse. Keep pulses short
-        // because RSSI is noisy and we re-measure four times per second.
+        let gapDB = max(0, targetRSSI - current)
         let duration = min(
-            max(0.08, 0.08 + gapDB * 0.018),
+            max(0.07, 0.07 + gapDB * 0.016),
             max(0.10, maxDrivePulse)
         )
-        let speed = UInt8(clamping: Int(max(48, min(100, driveSpeed))))
+
+        let speed = UInt8(
+            clamping: Int(
+                max(48, min(100, driveSpeed))
+            )
+        )
 
         executing = true
         droid.forward(speed: speed)
-        state = "PROXIMITY CHASE / CLOSING"
+        state = "STRAIGHT PROXIMITY / CATCH UP"
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + duration
+        ) { [weak self] in
             guard let self, self.isActive else { return }
             self.droid.stopDrive()
             self.executing = false
@@ -336,21 +382,33 @@ final class DirectShadowFollowController: ObservableObject {
 
     private func performTurn(_ difference: Double) {
         let degreesPerSecond = max(30, turnDegreesPerSecond)
-        let requestedDuration = abs(difference) / degreesPerSecond
-        let duration = min(max(0.06, requestedDuration), max(0.08, maxTurnPulse))
-        let speed = UInt8(clamping: Int(max(42, min(90, turnSpeed))))
+        let requestedDuration =
+            abs(difference) / degreesPerSecond
+
+        let duration = min(
+            max(0.055, requestedDuration),
+            max(0.08, maxTurnPulse)
+        )
+
+        let speed = UInt8(
+            clamping: Int(
+                max(40, min(82, turnSpeed))
+            )
+        )
 
         executing = true
 
         if difference < 0 {
             droid.rotateLeft(speed: speed)
-            state = "FOLLOWING / TURN LEFT"
+            state = "HYBRID FOLLOW / TURN LEFT"
         } else {
             droid.rotateRight(speed: speed)
-            state = "FOLLOWING / TURN RIGHT"
+            state = "HYBRID FOLLOW / TURN RIGHT"
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + duration
+        ) { [weak self] in
             guard let self, self.isActive else { return }
 
             self.droid.stopDrive()
@@ -360,9 +418,11 @@ final class DirectShadowFollowController: ObservableObject {
                 duration *
                 degreesPerSecond
 
-            self.estimatedDroidHeading = self.shortestAngle(
-                self.estimatedDroidHeading + signedDegrees
-            )
+            self.estimatedDroidHeading =
+                self.shortestAngle(
+                    self.estimatedDroidHeading +
+                    signedDegrees
+                )
 
             self.executing = false
         }
@@ -370,15 +430,36 @@ final class DirectShadowFollowController: ObservableObject {
 
     private func performForwardPulse() {
         let seconds = max(0.8, secondsPerMeter)
-        let requestedDuration = accumulatedDistance * seconds
-        let duration = min(max(0.07, requestedDuration), max(0.09, maxDrivePulse))
-        let speed = UInt8(clamping: Int(max(45, min(100, driveSpeed))))
+        let requestedDuration =
+            accumulatedDistance * seconds
+
+        let duration = min(
+            max(0.065, requestedDuration),
+            max(0.09, maxDrivePulse)
+        )
+
+        var speed = max(45, min(100, driveSpeed))
+
+        // If Bluetooth says the phone is clearly farther than the calibrated
+        // gap, let R2 catch up a little harder without changing steering.
+        if let targetRSSI = twoFootRSSI {
+            let current = droid.smoothedRSSI
+            if current < targetRSSI - 8 {
+                speed = min(100, speed + 8)
+            } else if current < targetRSSI - 5 {
+                speed = min(100, speed + 4)
+            }
+        }
 
         executing = true
-        droid.forward(speed: speed)
-        state = "FOLLOWING / CATCH UP"
+        droid.forward(
+            speed: UInt8(clamping: Int(speed))
+        )
+        state = "HYBRID FOLLOW / CATCH UP"
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + duration
+        ) { [weak self] in
             guard let self, self.isActive else { return }
 
             self.droid.stopDrive()
@@ -393,43 +474,65 @@ final class DirectShadowFollowController: ObservableObject {
         }
     }
 
-    private func performPersonalityIfNeeded() {
-        guard personalityEnabled, droid.isConnected else { return }
-
-        let now = Date()
-
-        if now >= nextLightAt {
-            droid.naturalFollowBlink()
-
-            if Int.random(in: 0...3) == 0 {
-                droid.ambientDomeGlance()
-            }
-
-            nextLightAt = now.addingTimeInterval(Double.random(in: 0.55...1.65))
+    private func isInsideStopDistance() -> Bool {
+        guard let targetRSSI = twoFootRSSI else {
+            return false
         }
 
-        if now >= nextChirpAt {
-            droid.expressiveChirp(bank: 1)
-            nextChirpAt = now.addingTimeInterval(Double.random(in: 4.0...7.5))
+        let current = droid.smoothedRSSI
+        guard current < 0, current > -120 else {
+            return false
         }
+
+        return current >= targetRSSI - 1.2
     }
 
-    private func circularBlend(from: Double, to: Double, alpha: Double) -> Double {
-        let clamped = max(0.05, min(0.80, alpha))
+    private func isClearlyOutsideStopDistance() -> Bool {
+        guard let targetRSSI = twoFootRSSI else {
+            return true
+        }
+
+        let current = droid.smoothedRSSI
+        guard current < 0, current > -120 else {
+            return true
+        }
+
+        return current <= targetRSSI - 4.0
+    }
+
+    private func circularBlend(
+        from: Double,
+        to: Double,
+        alpha: Double
+    ) -> Double {
+        let clamped = max(0.05, min(0.50, alpha))
         let difference = shortestAngle(to - from)
         return shortestAngle(from + difference * clamped)
     }
 
     private func normalized360(_ value: Double) -> Double {
-        var result = value.truncatingRemainder(dividingBy: 360)
-        if result < 0 { result += 360 }
+        var result =
+            value.truncatingRemainder(dividingBy: 360)
+
+        if result < 0 {
+            result += 360
+        }
+
         return result
     }
 
     private func shortestAngle(_ value: Double) -> Double {
-        var result = value.truncatingRemainder(dividingBy: 360)
-        if result > 180 { result -= 360 }
-        if result < -180 { result += 360 }
+        var result =
+            value.truncatingRemainder(dividingBy: 360)
+
+        if result > 180 {
+            result -= 360
+        }
+
+        if result < -180 {
+            result += 360
+        }
+
         return result
     }
 }
