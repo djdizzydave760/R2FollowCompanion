@@ -404,12 +404,19 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
         manifestProfiles.removeAll()
         bundledURLs.removeAll()
 
-        guard
-            let manifestURL = Bundle.main.url(
+        let manifestURL =
+            Bundle.main.url(
                 forResource: "SoundBatchManifest",
                 withExtension: "json",
                 subdirectory: "SoundBatch"
-            ),
+            ) ??
+            Bundle.main.url(
+                forResource: "SoundBatchManifest",
+                withExtension: "json"
+            )
+
+        guard
+            let manifestURL,
             let data = try? Data(contentsOf: manifestURL),
             let manifest = try? JSONDecoder().decode(
                 R2SoundBatchManifest.self,
@@ -423,11 +430,18 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
         for profile in manifest.sounds {
             manifestProfiles[profile.file] = profile
 
-            if let url = Bundle.main.url(
-                forResource: profile.file,
-                withExtension: nil,
-                subdirectory: "SoundBatch"
-            ) {
+            let url =
+                Bundle.main.url(
+                    forResource: profile.file,
+                    withExtension: nil,
+                    subdirectory: "SoundBatch"
+                ) ??
+                Bundle.main.url(
+                    forResource: profile.file,
+                    withExtension: nil
+                )
+
+            if let url {
                 bundledURLs.append(url)
             }
         }
