@@ -425,7 +425,10 @@ struct ContentView: View {
 
                 calibrationSlider(
                     "Sound Batch volume",
-                    value: $model.externalAudio.packVolume,
+                    value: Binding(
+                        get: { model.externalAudio.packVolume },
+                        set: { model.externalAudio.packVolume = $0 }
+                    ),
                     range: 0.10...1.00,
                     step: 0.05,
                     valueText: String(format: "%.0f%%", model.externalAudio.packVolume * 100)
