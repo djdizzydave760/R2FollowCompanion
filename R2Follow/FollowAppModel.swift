@@ -459,14 +459,26 @@ final class FollowAppModel: ObservableObject {
             return
         }
 
-        if !externalAudio.isRunning {
-            externalAudio.start()
-        }
-
-        externalAudio.playDroidChirp(intensity: 0.75)
+        externalAudio.start()
+        externalAudio.playLoudRouteTest()
         directBLE.expressiveHeadAndLights()
-        status =
-            "SPEAKER TEST • \(externalAudio.routeDescription)"
+
+        if externalAudio.isBluetoothA2DP {
+            status =
+                "JBL TEST SENT • \(externalAudio.routeDescription)"
+        } else {
+            status =
+                "AUDIO NOT ROUTED TO JBL • \(externalAudio.routeDescription)"
+        }
+    }
+
+    func refreshExternalAudioRoute() {
+        externalAudio.start()
+        externalAudio.refreshRoute()
+
+        status = externalAudio.isBluetoothA2DP
+            ? "BLUETOOTH AUDIO ROUTE READY • \(externalAudio.routeDescription)"
+            : "SELECT JBL CLIP 5 AS IPHONE AUDIO OUTPUT • \(externalAudio.routeDescription)"
     }
 
     // MARK: - R2 pre-follow calibration
