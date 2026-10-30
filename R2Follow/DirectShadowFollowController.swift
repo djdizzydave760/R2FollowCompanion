@@ -149,6 +149,11 @@ final class DirectShadowFollowController: ObservableObject {
     ) {
         guard isActive, droid.isConnected else { return }
 
+        if !turnCorrectionEnabled, twoFootRSSI != nil {
+            // Pure Bluetooth proximity mode: no compass or pedometer steering.
+            return
+        }
+
         let total = max(0, totalDistanceMeters)
         let delta = max(0, min(1.0, total - lastTotalDistance))
         lastTotalDistance = total
@@ -268,6 +273,11 @@ final class DirectShadowFollowController: ObservableObject {
 
         guard !executing else { return }
 
+        if !turnCorrectionEnabled, twoFootRSSI != nil {
+            performProximityForwardPulse()
+            return
+        }
+
         while let first = queue.first, first.readyAt <= Date() {
             queue.removeFirst()
             accumulatedDistance += first.distanceDeltaMeters
@@ -292,6 +302,36 @@ final class DirectShadowFollowController: ObservableObject {
         }
 
         state = queue.isEmpty ? "FOLLOWING / WAITING" : "FOLLOWING / TRAIL BUFFER"
+    }
+
+    private func performProximityForwardPulse() {
+        guard let twoFootRSSI else { return }
+
+        let current = droid.smoothedRSSI
+        guard current < 0, current > -120 else {
+            state = "PROXIMITY / WAITING FOR SIGNAL"
+            return
+        }
+
+        let gapDB = max(0, twoFootRSSI - current)
+
+        // Farther signal = slightly longer catch-up pulse. Keep pulses short
+        // because RSSI is noisy and we re-measure four times per second.
+        let duration = min(
+            max(0.08, 0.08 + gapDB * 0.018),
+            max(0.10, maxDrivePulse)
+        )
+        let speed = UInt8(clamping: Int(max(48, min(100, driveSpeed))))
+
+        executing = true
+        droid.forward(speed: speed)
+        state = "PROXIMITY CHASE / CLOSING"
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+            guard let self, self.isActive else { return }
+            self.droid.stopDrive()
+            self.executing = false
+        }
     }
 
     private func performTurn(_ difference: Double) {
