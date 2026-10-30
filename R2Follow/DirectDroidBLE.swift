@@ -26,6 +26,7 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
     @Published var lastRX = ""
     @Published var rssi = -100.0
     @Published var smoothedRSSI = -100.0
+    @Published private(set) var driveLocked = false
 
     var onDisconnected: (() -> Void)?
 
@@ -304,17 +305,40 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         sendCommand(id: 5, data: Data([selector, speed, rampHi, rampLo, 0x00, 0x00]))
     }
 
+    func setDriveLocked(_ locked: Bool) {
+        driveLocked = locked
+
+        if locked {
+            stopDrive()
+        }
+    }
+
     func forward(speed: UInt8) {
+        guard !driveLocked else {
+            stopDrive()
+            return
+        }
+
         motor(direction: 0, motor: 0, speed: speed)
         motor(direction: 0, motor: 1, speed: speed)
     }
 
     func rotateLeft(speed: UInt8) {
+        guard !driveLocked else {
+            stopDrive()
+            return
+        }
+
         motor(direction: 0, motor: 0, speed: speed)
         motor(direction: 8, motor: 1, speed: speed)
     }
 
     func rotateRight(speed: UInt8) {
+        guard !driveLocked else {
+            stopDrive()
+            return
+        }
+
         motor(direction: 8, motor: 0, speed: speed)
         motor(direction: 0, motor: 1, speed: speed)
     }
@@ -509,6 +533,9 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
     }
 
     func executeScript(_ scriptID: Int) {
+        // Disney park scripts may contain wheel movement. Do not execute them
+        // while Backpack Mode has physically locked body movement.
+        guard !driveLocked else { return }
         guard scriptID > 0, scriptID != 13 else { return }
         sendCommand(id: 12, data: Data([bcd(scriptID), bcd(2)]))
     }
