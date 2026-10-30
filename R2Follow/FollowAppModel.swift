@@ -454,14 +454,12 @@ final class FollowAppModel: ObservableObject {
     }
 
     func testExternalSpeaker() {
-        guard directBLE.isConnected else {
-            status = "Connect R2 before testing external speaker sync"
-            return
-        }
-
         externalAudio.start()
         externalAudio.playLoudRouteTest()
-        directBLE.expressiveHeadAndLights()
+
+        if directBLE.isConnected {
+            directBLE.expressiveHeadAndLights()
+        }
 
         if externalAudio.isBluetoothA2DP {
             status =
