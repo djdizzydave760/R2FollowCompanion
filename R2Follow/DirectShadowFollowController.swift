@@ -409,7 +409,7 @@ final class DirectShadowFollowController: ObservableObject {
         }
 
         if now >= nextChirpAt {
-            droid.chirp(bank: 1)
+            droid.expressiveChirp(bank: 1)
             nextChirpAt = now.addingTimeInterval(Double.random(in: 4.0...7.5))
         }
     }
