@@ -15,7 +15,9 @@ final class DirectShadowFollowController: ObservableObject {
     @Published private(set) var headingError = 0.0
     @Published private(set) var queuedDistance = 0.0
     @Published var personalityEnabled = true
-    @Published var turnCorrectionEnabled = true
+    @Published var turnCorrectionEnabled = false
+    @Published var twoFootRSSI: Double?
+    @Published private(set) var proximityState = "NOT CALIBRATED"
 
     // Live calibration controls. These can be adjusted from the iPhone before Follow.
     @Published var shadowDelay = 0.35
@@ -43,6 +45,7 @@ final class DirectShadowFollowController: ObservableObject {
     private var hasFilteredHeading = false
     private var nextChirpAt = Date.distantFuture
     private var nextLightAt = Date.distantFuture
+    private var proximityHolding = false
 
     init(droid: DirectDroidBLE) {
         self.droid = droid
@@ -60,7 +63,41 @@ final class DirectShadowFollowController: ObservableObject {
         headingSmoothing = 0.22
         maxDrivePulse = 0.32
         maxTurnPulse = 0.22
-        turnCorrectionEnabled = true
+        turnCorrectionEnabled = false
+    }
+
+    func calibrateTwoFootStop(usingRSSI rssi: Double) {
+        guard rssi < 0, rssi > -120 else {
+            proximityState = "WAITING FOR VALID BLUETOOTH SIGNAL"
+            return
+        }
+
+        twoFootRSSI = rssi
+        proximityState = String(format: "2 FT SET • %.0f dBm", rssi)
+    }
+
+    func clearTwoFootStop() {
+        twoFootRSSI = nil
+        proximityState = "NOT CALIBRATED"
+    }
+
+    private func isInsideStopDistance() -> Bool {
+        guard let twoFootRSSI else { return false }
+        let current = droid.smoothedRSSI
+        guard current < 0, current > -120 else { return false }
+
+        // RSSI becomes less negative as the phone gets closer. A small margin
+        // prevents rapid stop/start chatter around the calibration point.
+        return current >= twoFootRSSI - 1.5
+    }
+
+    private func isClearlyOutsideStopDistance() -> Bool {
+        guard let twoFootRSSI else { return true }
+        let current = droid.smoothedRSSI
+        guard current < 0, current > -120 else { return true }
+
+        // Hysteresis: R2 must fall several dB farther away before resuming.
+        return current <= twoFootRSSI - 4.0
     }
 
     func setReferenceHeading(_ heading: Double) {
@@ -92,6 +129,7 @@ final class DirectShadowFollowController: ObservableObject {
         state = "FOLLOWING / WAITING FOR STEPS"
         nextChirpAt = Date().addingTimeInterval(2.5)
         nextLightAt = Date().addingTimeInterval(0.6)
+        proximityHolding = false
 
         if personalityEnabled {
             droid.setAllHeadLEDs(on: true)
@@ -206,6 +244,28 @@ final class DirectShadowFollowController: ObservableObject {
 
         performPersonalityIfNeeded()
 
+        if twoFootRSSI != nil {
+            if proximityHolding {
+                if isClearlyOutsideStopDistance() {
+                    proximityHolding = false
+                    proximityState = "PHONE MOVED AWAY • RESUMING"
+                } else {
+                    droid.stopDrive()
+                    state = "HOLDING • ABOUT 2 FT"
+                    proximityState = "HOLDING NEAR 2 FT"
+                    return
+                }
+            } else if isInsideStopDistance() {
+                proximityHolding = true
+                droid.stopDrive()
+                state = "HOLDING • ABOUT 2 FT"
+                proximityState = "HOLDING NEAR 2 FT"
+                return
+            } else {
+                proximityState = "PHONE FARTHER THAN STOP POINT"
+            }
+        }
+
         guard !executing else { return }
 
         while let first = queue.first, first.readyAt <= Date() {
@@ -300,6 +360,11 @@ final class DirectShadowFollowController: ObservableObject {
 
         if now >= nextLightAt {
             droid.naturalFollowBlink()
+
+            if Int.random(in: 0...3) == 0 {
+                droid.ambientDomeGlance()
+            }
+
             nextLightAt = now.addingTimeInterval(Double.random(in: 0.55...1.65))
         }
 
