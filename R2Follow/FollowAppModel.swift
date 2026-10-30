@@ -19,9 +19,10 @@ enum R2OperationMode: String, CaseIterable, Identifiable {
 
 enum R2PersonalityMode: String, CaseIterable, Identifiable {
     case relaxed = "Relaxed"
+    case curious = "Curious"
+    case active = "Active"
     case excited = "Excited"
     case patrol = "On Patrol"
-    case curious = "Curious"
     case quiet = "Quiet"
 
     var id: String { rawValue }
@@ -55,8 +56,29 @@ final class FollowAppModel: ObservableObject {
     @Published var personalityMode: R2PersonalityMode {
         didSet {
             UserDefaults.standard.set(personalityMode.rawValue, forKey: "personalityMode")
+            applyPersonalityDefaults()
             resetPersonalitySchedule()
         }
+    }
+
+    @Published var backpackHeadInterval = 12.0 {
+        didSet { UserDefaults.standard.set(backpackHeadInterval, forKey: "backpackHeadInterval") }
+    }
+
+    @Published var backpackSoundInterval = 22.0 {
+        didSet { UserDefaults.standard.set(backpackSoundInterval, forKey: "backpackSoundInterval") }
+    }
+
+    @Published var backpackReactionChance = 0.65 {
+        didSet { UserDefaults.standard.set(backpackReactionChance, forKey: "backpackReactionChance") }
+    }
+
+    @Published var backpackHeadAmount = 0.65 {
+        didSet { UserDefaults.standard.set(backpackHeadAmount, forKey: "backpackHeadAmount") }
+    }
+
+    @Published var backpackLightIntensity = 0.65 {
+        didSet { UserDefaults.standard.set(backpackLightIntensity, forKey: "backpackLightIntensity") }
     }
 
     @Published var externalAudioEnabled: Bool {
@@ -90,7 +112,6 @@ final class FollowAppModel: ObservableObject {
     private var sessionID = UUID().uuidString
     private var sendTimer: Timer?
     private var lifeTimer: Timer?
-    private var nextIdleBlink = Date.distantPast
     private var nextIdleHead = Date.distantPast
     private var nextIdleChirp = Date.distantPast
     private var lastSentDistance = 0.0
@@ -109,6 +130,19 @@ final class FollowAppModel: ObservableObject {
 
         let storedPersonality = UserDefaults.standard.string(forKey: "personalityMode")
         personalityMode = R2PersonalityMode(rawValue: storedPersonality ?? "") ?? .relaxed
+
+        let hasBackpackTuning =
+            UserDefaults.standard.object(forKey: "backpackHeadInterval") != nil
+
+        if hasBackpackTuning {
+            backpackHeadInterval = UserDefaults.standard.double(forKey: "backpackHeadInterval")
+            backpackSoundInterval = UserDefaults.standard.double(forKey: "backpackSoundInterval")
+            backpackReactionChance = UserDefaults.standard.double(forKey: "backpackReactionChance")
+            backpackHeadAmount = UserDefaults.standard.double(forKey: "backpackHeadAmount")
+            backpackLightIntensity = UserDefaults.standard.double(forKey: "backpackLightIntensity")
+        } else {
+            applyPersonalityDefaults()
+        }
 
         if UserDefaults.standard.object(
             forKey: "externalAudioEnabled"
@@ -217,7 +251,7 @@ final class FollowAppModel: ObservableObject {
             motion.stopTracking()
             motion.startBackgroundFollowSession()
 
-            directBLE.setAllHeadLEDs(on: true)
+            directBLE.setAllHeadLEDs(on: false)
             resetPersonalitySchedule()
 
             if externalAudioEnabled {
@@ -229,11 +263,72 @@ final class FollowAppModel: ObservableObject {
         }
     }
 
+    private func applyPersonalityDefaults() {
+        switch personalityMode {
+        case .relaxed:
+            backpackHeadInterval = 14.0
+            backpackSoundInterval = 26.0
+            backpackReactionChance = 0.52
+            backpackHeadAmount = 0.52
+            backpackLightIntensity = 0.48
+
+        case .curious:
+            backpackHeadInterval = 9.0
+            backpackSoundInterval = 18.0
+            backpackReactionChance = 0.62
+            backpackHeadAmount = 0.68
+            backpackLightIntensity = 0.62
+
+        case .active:
+            backpackHeadInterval = 7.0
+            backpackSoundInterval = 14.0
+            backpackReactionChance = 0.72
+            backpackHeadAmount = 0.78
+            backpackLightIntensity = 0.72
+
+        case .excited:
+            backpackHeadInterval = 5.0
+            backpackSoundInterval = 10.0
+            backpackReactionChance = 0.82
+            backpackHeadAmount = 0.95
+            backpackLightIntensity = 0.92
+
+        case .patrol:
+            backpackHeadInterval = 8.0
+            backpackSoundInterval = 17.0
+            backpackReactionChance = 0.66
+            backpackHeadAmount = 0.76
+            backpackLightIntensity = 0.70
+
+        case .quiet:
+            backpackHeadInterval = 20.0
+            backpackSoundInterval = 38.0
+            backpackReactionChance = 0.42
+            backpackHeadAmount = 0.42
+            backpackLightIntensity = 0.32
+        }
+    }
+
+    func restorePersonalityDefaults() {
+        applyPersonalityDefaults()
+        resetPersonalitySchedule()
+        status = "\(personalityMode.rawValue) Backpack defaults restored"
+    }
+
+    private func randomizedInterval(_ base: Double) -> TimeInterval {
+        let safe = max(2.0, base)
+        return safe * Double.random(in: 0.78...1.32)
+    }
+
     private func resetPersonalitySchedule() {
         let now = Date()
-        nextIdleBlink = now.addingTimeInterval(0.4)
-        nextIdleHead = now.addingTimeInterval(0.8)
-        nextIdleChirp = now.addingTimeInterval(1.5)
+        nextIdleHead = now.addingTimeInterval(
+            randomizedInterval(backpackHeadInterval)
+        )
+        nextIdleChirp = now.addingTimeInterval(
+            randomizedInterval(backpackSoundInterval)
+        )
+        directBLE.setAllHeadLEDs(on: false)
     }
 
     private func randomDelay(_ range: ClosedRange<Double>) -> TimeInterval {
@@ -318,126 +413,75 @@ final class FollowAppModel: ObservableObject {
 
         let now = Date()
 
-        let blinkRange: ClosedRange<Double>
-        let headRange: ClosedRange<Double>
-        let chirpRange: ClosedRange<Double>
-        let soundBank: Int?
-        let doubleHeadChance: Int
-        let soundIntensity: Double
+        // Backpack controls are deliberately slower than the earlier build.
+        // Hybrid Follow uses the same personality but at a slightly calmer rate
+        // so drive/navigation remains the primary behavior.
+        let modeScale =
+            operationMode == .backpack
+            ? 1.0
+            : 1.35
 
-        switch personalityMode {
-        case .relaxed:
-            blinkRange =
-                operationMode == .backpack
-                ? 0.8...1.8
-                : 1.2...2.8
+        let headBase = backpackHeadInterval * modeScale
+        let soundBase = backpackSoundInterval * modeScale
 
-            headRange =
-                operationMode == .backpack
-                ? 2.0...4.0
-                : 4.0...7.0
+        let soundDue = force || now >= nextIdleChirp
 
-            chirpRange =
-                operationMode == .backpack
-                ? 5.0...9.0
-                : 8.0...14.0
+        if soundDue {
+            nextIdleChirp = now.addingTimeInterval(
+                randomizedInterval(soundBase)
+            )
 
-            soundBank = 1
-            doubleHeadChance = 6
-            soundIntensity = 0.45
-
-        case .excited:
-            blinkRange = 0.25...0.75
-            headRange = 0.9...2.0
-            chirpRange = 2.0...3.8
-            soundBank = 1
-            doubleHeadChance = 2
-            soundIntensity = 0.95
-
-        case .patrol:
-            blinkRange = 0.45...1.15
-            headRange = 1.1...2.4
-            chirpRange = 3.0...5.5
-            soundBank = 7
-            doubleHeadChance = 3
-            soundIntensity = 0.68
-
-        case .curious:
-            blinkRange = 0.55...1.4
-            headRange = 1.2...2.8
-            chirpRange = 3.5...6.5
-            soundBank = 1
-            doubleHeadChance = 2
-            soundIntensity = 0.60
-
-        case .quiet:
-            blinkRange = 1.4...3.2
-            headRange = 3.2...6.0
-            chirpRange = 10.0...18.0
-            soundBank = nil
-            doubleHeadChance = 8
-            soundIntensity = 0.25
-        }
-
-        if force || now >= nextIdleBlink {
-            directBLE.naturalFollowBlink()
-            nextIdleBlink =
+            nextIdleHead = max(
+                nextIdleHead,
                 now.addingTimeInterval(
-                    randomDelay(blinkRange)
+                    randomizedInterval(headBase * 0.70)
                 )
-        }
+            )
 
-        if force || now >= nextIdleHead {
-            // Dome-only movement is always safe in Backpack Mode because the
-            // wheel lock is enforced down in DirectDroidBLE.
-            directBLE.ambientDomeGlance()
-            directBLE.naturalFollowBlink()
+            let shouldReact =
+                force ||
+                Double.random(in: 0...1) <= backpackReactionChance
 
-            if Int.random(in: 0...doubleHeadChance) == 0 {
-                DispatchQueue.main.asyncAfter(
-                    deadline: .now() + 0.75
-                ) { [weak self] in
-                    guard let self,
-                          self.directBLE.isConnected else {
-                        return
-                    }
-
-                    self.directBLE.ambientDomeGlance()
-                    self.directBLE.naturalFollowBlink()
-                }
-            }
-
-            nextIdleHead =
-                now.addingTimeInterval(
-                    randomDelay(headRange)
-                )
-        }
-
-        if force || now >= nextIdleChirp {
-            if soundBank != nil {
+            if shouldReact {
                 if externalAudioEnabled &&
                    externalAudio.isRunning &&
-                   externalAudio.hasImportedSoundPack {
+                   externalAudio.totalAvailablePackSounds > 0 {
 
-                    let played =
-                        externalAudio.playNextPackSound()
-
-                    if played {
-                        directBLE.expressiveHeadAndLights()
+                    if let playback = externalAudio.playNextPackSound() {
+                        if let profile = playback.profile {
+                            directBLE.animateForSound(
+                                profile: profile,
+                                headAmount: backpackHeadAmount,
+                                lightIntensity: backpackLightIntensity
+                            )
+                        } else {
+                            directBLE.expressiveHeadAndLights()
+                        }
                     } else {
                         directBLE.expressiveRandomBuiltInSound()
                     }
                 } else {
-                    // Use R2's real built-in sound library. The BLE layer
-                    // shuffles every known track before repeating any sound.
                     directBLE.expressiveRandomBuiltInSound()
                 }
             }
 
-            nextIdleChirp =
-                now.addingTimeInterval(
-                    randomDelay(chirpRange)
+            return
+        }
+
+        if force || now >= nextIdleHead {
+            nextIdleHead = now.addingTimeInterval(
+                randomizedInterval(headBase)
+            )
+
+            let shouldReact =
+                force ||
+                Double.random(in: 0...1) <= backpackReactionChance
+
+            if shouldReact {
+                directBLE.ambientDomeGlance(
+                    amount: backpackHeadAmount
                 )
+            }
         }
     }
 
@@ -450,9 +494,7 @@ final class FollowAppModel: ObservableObject {
             externalAudio.start()
             servicePersonalityPulse(force: true)
             status =
-                externalAudio.hasImportedSoundPack
-                ? "JBL SOUND PACK ON • \(externalAudio.importedSoundCount) files"
-                : "JBL ROUTE ON • no pack loaded • using R2 built-in sounds"
+                "SOUND BATCH ON • \(externalAudio.totalAvailablePackSounds) files • \(externalAudio.routeDescription)"
         } else {
             externalAudio.stop()
             status = "External R2 audio off • using R2 internal sounds"
@@ -463,34 +505,37 @@ final class FollowAppModel: ObservableObject {
         externalAudio.importSoundFiles(urls)
         externalAudio.start()
 
-        if externalAudio.hasImportedSoundPack {
-            status =
-                "JBL SOUND PACK READY • \(externalAudio.importedSoundCount) files"
-        } else {
-            status =
-                "No sound pack loaded • using R2 built-in sounds"
-        }
+        status =
+            "SOUND BATCH READY • \(externalAudio.totalAvailablePackSounds) files"
     }
 
     func clearExternalSoundPack() {
-        externalAudio.clearSoundPack()
+        externalAudio.clearImportedSoundPack()
         status =
-            "JBL sound pack cleared • using R2 built-in sound shuffle"
+            "Extra imported sounds cleared • bundled Sound Batch remains"
     }
 
     func testExternalSoundPack() {
         externalAudio.start()
 
-        if externalAudio.playNextPackSound() {
+        if let playback = externalAudio.playNextPackSound() {
             if directBLE.isConnected {
-                directBLE.expressiveHeadAndLights()
+                if let profile = playback.profile {
+                    directBLE.animateForSound(
+                        profile: profile,
+                        headAmount: backpackHeadAmount,
+                        lightIntensity: backpackLightIntensity
+                    )
+                } else {
+                    directBLE.expressiveHeadAndLights()
+                }
             }
 
             status =
-                "PACK TEST • \(externalAudio.lastPackSound)"
+                "SOUND BATCH TEST • \(externalAudio.lastPackSound)"
         } else {
             status =
-                "No imported JBL sound pack yet"
+                "Bundled Sound Batch is not available in this build"
         }
     }
 
