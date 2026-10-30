@@ -527,49 +527,8 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
     func expressiveHeadAndLights() {
         guard isConnected else { return }
 
-        ambientGeneration += 1
-        let generation = ambientGeneration
-        let lookLeftFirst = Bool.random()
-
-        // Make the LEDs visibly respond at the same time as the dome.
-        naturalFollowBlink()
-
-        if lookLeftFirst {
-            domeLeft(speed: UInt8(Int.random(in: 92...118)))
-        } else {
-            domeRight(speed: UInt8(Int.random(in: 92...118)))
-        }
-
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + Double.random(in: 0.26...0.40)
-        ) { [weak self] in
-            guard let self,
-                  self.isConnected,
-                  self.ambientGeneration == generation else {
-                return
-            }
-
-            self.naturalFollowBlink()
-
-            if lookLeftFirst {
-                self.domeRight(speed: UInt8(Int.random(in: 78...98)))
-            } else {
-                self.domeLeft(speed: UInt8(Int.random(in: 78...98)))
-            }
-        }
-
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + Double.random(in: 0.58...0.78)
-        ) { [weak self] in
-            guard let self,
-                  self.isConnected,
-                  self.ambientGeneration == generation else {
-                return
-            }
-
-            self.stopDome()
-            self.centerDome(speed: 175)
-        }
+        setAllHeadLEDs(on: false)
+        ambientDomeGlance(amount: 1.0)
     }
 
     func expressiveChirp(bank: Int = 1) {
@@ -581,24 +540,9 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
     func testHeadAndVoice() {
         guard isConnected else { return }
 
-        ambientGeneration += 1
-        let generation = ambientGeneration
-
         playNextShuffledBuiltInSound()
-        setAllHeadLEDs(on: true)
-        domeLeft(speed: 120)
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
-            guard let self, self.isConnected, self.ambientGeneration == generation else { return }
-            self.domeRight(speed: 120)
-            self.naturalFollowBlink()
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.10) { [weak self] in
-            guard let self, self.isConnected, self.ambientGeneration == generation else { return }
-            self.stopDome()
-            self.centerDome(speed: 190)
-        }
+        setAllHeadLEDs(on: false)
+        ambientDomeGlance(amount: 1.0)
     }
 
     func setAllHeadLEDs(on: Bool) {
@@ -608,14 +552,54 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         audioCommand(command, parameter: 4)
     }
 
-    func ambientDomeGlance() {
+    private func setHeadLEDMask(_ mask: Int, on: Bool) {
+        let command: UInt8 = on ? 72 : 73
+        let values = [1, 2, 4]
+
+        for value in values where (mask & value) != 0 {
+            audioCommand(command, parameter: UInt8(value))
+        }
+    }
+
+    private func pulseHeadLEDMask(
+        _ mask: Int,
+        duration: TimeInterval
+    ) {
+        guard isConnected else { return }
+
+        setHeadLEDMask(mask, on: true)
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + max(0.04, duration)
+        ) { [weak self] in
+            self?.setHeadLEDMask(mask, on: false)
+        }
+    }
+
+    func ambientDomeGlance(amount: Double = 1.0) {
         guard isConnected else { return }
 
         ambientGeneration += 1
         let generation = ambientGeneration
+        let scale = max(0.25, min(1.35, amount))
         let goLeft = Bool.random()
-        let speed = UInt8(Int.random(in: 78...108))
-        let firstDuration = Double.random(in: 0.34...0.62)
+        let speed = UInt8(
+            Int(
+                Double(Int.random(in: 66...92)) *
+                scale
+            ).clamped(to: 45...120)
+        )
+        let firstDuration =
+            Double.random(in: 0.24...0.46) *
+            (0.75 + 0.35 * scale)
+
+        // Lights are normally OFF. A short pulse marks the start of the head
+        // reaction, then goes dark again.
+        setAllHeadLEDs(on: false)
+        pulseHeadLEDMask(
+            [1, 2, 4].randomElement() ?? 2,
+            duration: 0.10 + 0.06 * scale
+        )
 
         if goLeft {
             domeLeft(speed: speed)
@@ -623,25 +607,52 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
             domeRight(speed: speed)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + firstDuration) { [weak self] in
-            guard let self, self.isConnected, self.ambientGeneration == generation else { return }
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + firstDuration
+        ) { [weak self] in
+            guard let self,
+                  self.isConnected,
+                  self.ambientGeneration == generation else {
+                return
+            }
+
             self.stopDome()
 
-            // Sometimes make a second curious glance before centering.
             if Bool.random() {
+                self.pulseHeadLEDMask(
+                    [1, 2, 4].randomElement() ?? 4,
+                    duration: 0.09 + 0.05 * scale
+                )
+
+                let secondSpeed = UInt8(
+                    Int(
+                        Double(Int.random(in: 54...78)) *
+                        scale
+                    ).clamped(to: 40...105)
+                )
+
                 if goLeft {
-                    self.domeRight(speed: UInt8(Int.random(in: 62...88)))
+                    self.domeRight(speed: secondSpeed)
                 } else {
-                    self.domeLeft(speed: UInt8(Int.random(in: 62...88)))
+                    self.domeLeft(speed: secondSpeed)
                 }
 
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) { [weak self] in
-                    guard let self, self.isConnected, self.ambientGeneration == generation else { return }
+                DispatchQueue.main.asyncAfter(
+                    deadline: .now() + 0.18 + 0.08 * scale
+                ) { [weak self] in
+                    guard let self,
+                          self.isConnected,
+                          self.ambientGeneration == generation else {
+                        return
+                    }
+
                     self.stopDome()
-                    self.centerDome(speed: 165)
+                    self.centerDome(speed: 150)
+                    self.setAllHeadLEDs(on: false)
                 }
             } else {
-                self.centerDome(speed: 165)
+                self.centerDome(speed: 150)
+                self.setAllHeadLEDs(on: false)
             }
         }
     }
@@ -649,35 +660,181 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
     func naturalFollowBlink() {
         guard isConnected else { return }
 
-        // Natural-looking independent head-light blink. Most of the time one LED
-        // blinks; occasionally two blink together. All lights return to ON.
-        let leds: [UInt8] = [1, 2, 4]
-        let first = leds.randomElement() ?? 2
-        let second = leds.filter { $0 != first }.randomElement()
-        let useSecond = Bool.random() && second != nil
+        setAllHeadLEDs(on: false)
 
-        audioCommand(73, parameter: first)
-
-        if useSecond, let second {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.035) { [weak self] in
-                self?.audioCommand(73, parameter: second)
-            }
-        }
-
-        let firstDelay = Double.random(in: 0.08...0.22)
-        DispatchQueue.main.asyncAfter(deadline: .now() + firstDelay) { [weak self] in
-            self?.audioCommand(72, parameter: first)
-        }
-
-        if useSecond, let second {
-            DispatchQueue.main.asyncAfter(deadline: .now() + firstDelay + 0.05) { [weak self] in
-                self?.audioCommand(72, parameter: second)
-            }
-        }
+        let mask = [1, 2, 4, 3, 5, 6].randomElement() ?? 2
+        pulseHeadLEDMask(
+            mask,
+            duration: Double.random(in: 0.07...0.16)
+        )
     }
 
     func followLightPulse() {
         naturalFollowBlink()
+    }
+
+    func animateForSound(
+        profile: R2SoundProfile,
+        headAmount: Double,
+        lightIntensity: Double
+    ) {
+        guard isConnected else { return }
+
+        ambientGeneration += 1
+        let generation = ambientGeneration
+        let headScale = max(0.20, min(1.35, headAmount))
+        let lightScale = max(0.10, min(1.0, lightIntensity))
+
+        setAllHeadLEDs(on: false)
+
+        // Beat/onset-aware LED pulses from the analyzed uploaded Sound Batch.
+        for event in profile.events {
+            // Lower LED strength intentionally drops quieter onset events.
+            let threshold = 0.92 - (0.72 * lightScale)
+            guard event.intensity >= threshold else { continue }
+
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + event.t
+            ) { [weak self] in
+                guard let self,
+                      self.isConnected,
+                      self.ambientGeneration == generation else {
+                    return
+                }
+
+                let width =
+                    event.width *
+                    (0.55 + 0.75 * lightScale)
+
+                self.pulseHeadLEDMask(
+                    event.mask,
+                    duration: width
+                )
+            }
+        }
+
+        scheduleHeadMotion(
+            profile: profile,
+            generation: generation,
+            amount: headScale
+        )
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + profile.duration + 0.20
+        ) { [weak self] in
+            guard let self,
+                  self.isConnected,
+                  self.ambientGeneration == generation else {
+                return
+            }
+
+            self.stopDome()
+            self.centerDome(speed: 150)
+            self.setAllHeadLEDs(on: false)
+        }
+    }
+
+    private func scheduleHeadMotion(
+        profile: R2SoundProfile,
+        generation: Int,
+        amount: Double
+    ) {
+        let duration = max(0.35, profile.duration)
+        let baseSpeed = UInt8(
+            Int(72.0 * amount).clamped(to: 42...115)
+        )
+        let quickSpeed = UInt8(
+            Int(96.0 * amount).clamped(to: 50...125)
+        )
+        let goLeft = Bool.random()
+
+        func move(_ left: Bool, speed: UInt8) {
+            if left {
+                domeLeft(speed: speed)
+            } else {
+                domeRight(speed: speed)
+            }
+        }
+
+        switch profile.headStyle {
+        case "shake", "nervous", "busy", "jerk":
+            move(goLeft, speed: quickSpeed)
+
+            for fraction in [0.24, 0.48, 0.70] {
+                DispatchQueue.main.asyncAfter(
+                    deadline: .now() + duration * fraction
+                ) { [weak self] in
+                    guard let self,
+                          self.isConnected,
+                          self.ambientGeneration == generation else {
+                        return
+                    }
+
+                    if Int(fraction * 100) % 2 == 0 {
+                        move(!goLeft, speed: quickSpeed)
+                    } else {
+                        move(goLeft, speed: quickSpeed)
+                    }
+                }
+            }
+
+        case "sway", "sad":
+            move(goLeft, speed: baseSpeed)
+
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + duration * 0.52
+            ) { [weak self] in
+                guard let self,
+                      self.isConnected,
+                      self.ambientGeneration == generation else {
+                    return
+                }
+
+                move(!goLeft, speed: baseSpeed)
+            }
+
+        case "bounce", "happy", "greet":
+            move(goLeft, speed: quickSpeed)
+
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + duration * 0.34
+            ) { [weak self] in
+                guard let self,
+                      self.isConnected,
+                      self.ambientGeneration == generation else {
+                    return
+                }
+
+                move(!goLeft, speed: quickSpeed)
+            }
+
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + duration * 0.68
+            ) { [weak self] in
+                guard let self,
+                      self.isConnected,
+                      self.ambientGeneration == generation else {
+                    return
+                }
+
+                self.centerDome(speed: 165)
+            }
+
+        default:
+            move(goLeft, speed: quickSpeed)
+
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + duration * 0.50
+            ) { [weak self] in
+                guard let self,
+                      self.isConnected,
+                      self.ambientGeneration == generation else {
+                    return
+                }
+
+                self.centerDome(speed: 160)
+            }
+        }
     }
 
     func executeScript(_ scriptID: Int) {
@@ -869,5 +1026,11 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         case .unknown: return "Bluetooth is starting…"
         @unknown default: return "Bluetooth unavailable"
         }
+    }
+}
+
+private extension Int {
+    func clamped(to range: ClosedRange<Int>) -> Int {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }
