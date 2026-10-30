@@ -244,7 +244,7 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
 
                 Toggle(
-                    "Use Imported Sound Pack on JBL",
+                    "Play Sound Batch through JBL / iPhone",
                     isOn: Binding(
                         get: { model.externalAudioEnabled },
                         set: { model.setExternalAudioEnabled($0) }
@@ -312,16 +312,17 @@ struct ContentView: View {
                         .foregroundStyle(.red)
                 }
 
-                Text(
-                    model.externalAudio.hasImportedSoundPack
-                        ? "JBL mode now uses your imported sound files only. The pack is shuffled so every file plays once before any sound repeats, while R2's dome and LEDs animate in sync."
-                        : "No JBL sound pack is loaded. R2 will use his real built-in Droid Depot sounds in a no-repeat shuffle. Import WAV, MP3, M4A, AAC, AIFF or CAF files if you want those sounds routed through the JBL."
-                )
-                .font(.caption)
-                .foregroundStyle(.orange)
+                Text("Your uploaded Sound Batch is bundled inside this app build. Each clip is shuffled without repeats. Its analyzed audio peaks drive R2's LED pulses, while the clip mood/duration shapes the dome motion. LEDs stay OFF between reactions.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
 
                 metric(
-                    "Imported sound pack",
+                    "Bundled Sound Batch",
+                    "\(model.externalAudio.bundledSoundCount) analyzed sounds"
+                )
+
+                metric(
+                    "Extra imported sounds",
                     "\(model.externalAudio.importedSoundCount) files"
                 )
 
@@ -344,9 +345,7 @@ struct ContentView: View {
                     showSoundPackImporter = true
                 } label: {
                     Label(
-                        model.externalAudio.hasImportedSoundPack
-                            ? "Add More Sound Files"
-                            : "Import R2 Sound Pack",
+                        "Add Extra Sound Files",
                         systemImage: "folder.badge.plus"
                     )
                     .frame(maxWidth: .infinity)
@@ -354,29 +353,101 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.cyan)
 
-                if model.externalAudio.hasImportedSoundPack {
-                    HStack {
-                        Button {
-                            model.testExternalSoundPack()
-                        } label: {
-                            Label(
-                                "Play Next Pack Sound",
-                                systemImage: "play.fill"
-                            )
-                        }
-                        .buttonStyle(.bordered)
+                HStack {
+                    Button {
+                        model.testExternalSoundPack()
+                    } label: {
+                        Label(
+                            "Play Next Sound Batch Clip",
+                            systemImage: "play.fill"
+                        )
+                    }
+                    .buttonStyle(.bordered)
 
+                    if model.externalAudio.hasImportedSoundPack {
                         Button(role: .destructive) {
                             model.clearExternalSoundPack()
                         } label: {
                             Label(
-                                "Clear Pack",
+                                "Clear Extra",
                                 systemImage: "trash"
                             )
                         }
                         .buttonStyle(.bordered)
                     }
                 }
+
+                Divider()
+
+                Text("BACKPACK ACTIVITY CONTROLS")
+                    .font(.caption.monospaced().bold())
+                    .foregroundStyle(.cyan)
+
+                calibrationSlider(
+                    "Head movement interval",
+                    value: $model.backpackHeadInterval,
+                    range: 3...30,
+                    step: 1,
+                    valueText: String(format: "%.0f sec", model.backpackHeadInterval)
+                )
+
+                calibrationSlider(
+                    "Sound interval",
+                    value: $model.backpackSoundInterval,
+                    range: 6...60,
+                    step: 1,
+                    valueText: String(format: "%.0f sec", model.backpackSoundInterval)
+                )
+
+                calibrationSlider(
+                    "Reaction chance",
+                    value: $model.backpackReactionChance,
+                    range: 0.20...1.00,
+                    step: 0.05,
+                    valueText: String(format: "%.0f%%", model.backpackReactionChance * 100)
+                )
+
+                calibrationSlider(
+                    "Head movement amount",
+                    value: $model.backpackHeadAmount,
+                    range: 0.25...1.20,
+                    step: 0.05,
+                    valueText: String(format: "%.0f%%", model.backpackHeadAmount * 100)
+                )
+
+                calibrationSlider(
+                    "LED beat strength",
+                    value: $model.backpackLightIntensity,
+                    range: 0.15...1.00,
+                    step: 0.05,
+                    valueText: String(format: "%.0f%%", model.backpackLightIntensity * 100)
+                )
+
+                calibrationSlider(
+                    "Sound Batch volume",
+                    value: $model.externalAudio.packVolume,
+                    range: 0.10...1.00,
+                    step: 0.05,
+                    valueText: String(format: "%.0f%%", model.externalAudio.packVolume * 100)
+                )
+
+                Button {
+                    model.restorePersonalityDefaults()
+                } label: {
+                    Label(
+                        "Restore \(model.personalityMode.rawValue) Defaults",
+                        systemImage: "arrow.counterclockwise"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Label(
+                    "Lights remain OFF while R2 is inactive",
+                    systemImage: "lightbulb.slash.fill"
+                )
+                .font(.caption.monospaced())
+                .foregroundStyle(.green)
 
                 Button {
                     model.testExternalSpeaker()
@@ -405,15 +476,17 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 4) {
                 switch model.personalityMode {
                 case .relaxed:
-                    Text("Relaxed • slower head glances, occasional chirps, gentle light activity")
-                case .excited:
-                    Text("Excited • frequent head movement, more talking and lively lights")
-                case .patrol:
-                    Text("On Patrol • frequent scanning head movement, alert-style responses and active lights")
+                    Text("Relaxed • long pauses, subtle dome motion, occasional sound")
                 case .curious:
-                    Text("Curious • lots of head glances and conversational reactions")
+                    Text("Curious • moderate dome glances and conversational sound timing")
+                case .active:
+                    Text("Active • noticeable activity without being constant")
+                case .excited:
+                    Text("Excited • the liveliest preset, still separated by natural pauses")
+                case .patrol:
+                    Text("On Patrol • measured scanning reactions with alert spacing")
                 case .quiet:
-                    Text("Quiet • head and lights stay alive with very little talking")
+                    Text("Quiet • very long pauses with minimal sound")
                 }
             }
             .font(.caption)
