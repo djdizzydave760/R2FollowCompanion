@@ -35,6 +35,8 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
     private var lastBreadcrumb: CLLocation?
     private var latestBreadcrumbTimestamp = Date.distantPast
 
+    var onActivityPulse: (() -> Void)?
+
     override init() {
         super.init()
         location.delegate = self
@@ -277,6 +279,8 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
             lastMotionActivityAt = Date()
             moving = true
         }
+
+        onActivityPulse?()
     }
 
     func locationManager(
