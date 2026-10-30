@@ -134,7 +134,6 @@ final class VoiceCommandListener: ObservableObject {
                 mode: .default,
                 options: [
                     .allowBluetoothA2DP,
-                    .defaultToSpeaker,
                     .duckOthers
                 ]
             )
