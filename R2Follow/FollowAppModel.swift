@@ -490,11 +490,6 @@ final class FollowAppModel: ObservableObject {
             return
         }
 
-        guard let calibratedHeading else {
-            status = "Calibrate before starting Follow Me"
-            return
-        }
-
         sequence = 0
         lastSentDistance = 0
         motion.startTracking()
@@ -513,7 +508,19 @@ final class FollowAppModel: ObservableObject {
                 return
             }
 
-            directFollow.start(initialHeading: calibratedHeading)
+            let directHeading: Double
+            if directFollow.turnCorrectionEnabled {
+                guard let calibratedHeading else {
+                    motion.stopTracking()
+                    status = "Align R2 + iPhone before using experimental turn correction"
+                    return
+                }
+                directHeading = calibratedHeading
+            } else {
+                directHeading = motion.heading
+            }
+
+            directFollow.start(initialHeading: directHeading)
             guard directFollow.isActive else {
                 motion.stopTracking()
                 status = "Could not start Direct Bluetooth Follow"
@@ -546,6 +553,12 @@ final class FollowAppModel: ObservableObject {
             guard followStatus?.droidConnected == true else {
                 motion.stopTracking()
                 status = "Connect R2 to Droid Control first"
+                return
+            }
+
+            guard let calibratedHeading else {
+                motion.stopTracking()
+                status = "Calibrate before starting Mac Bridge Follow"
                 return
             }
 
