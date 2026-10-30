@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var model: FollowAppModel
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showAdvancedFollow = false
 
     var body: some View {
         NavigationStack {
@@ -163,116 +164,113 @@ struct ContentView: View {
     }
 
     private var r2CalibrationCard: some View {
-        card("R2 FOLLOW CALIBRATION", icon: "slider.horizontal.3") {
-            Text("Use these controls before Follow. Put R2 about 3 ft behind you, facing exactly the same direction you are facing. Test forward first; R2 should move straight, not rotate.")
+        card("PHONE PROXIMITY FOLLOW", icon: "iphone.radiowaves.left.and.right") {
+            Text("Simple mode: Bluetooth measures how close your iPhone is to R2. Put the phone exactly 2 ft from R2 and save that signal level. R2 will stop when the signal reaches that calibrated point.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            metric("Live Bluetooth", String(format: "%.0f dBm", model.directBLE.smoothedRSSI))
+            metric("2-ft calibration", model.directFollow.proximityState)
+
             Button {
-                model.markR2AlignedWithPhone()
+                model.calibrateTwoFootStop()
             } label: {
-                Label("1. Mark R2 + iPhone Facing Same Direction", systemImage: "scope")
+                Label("Set Current Phone Position as 2 ft", systemImage: "ruler.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .tint(.cyan)
             .disabled(!model.directBLE.isConnected || model.isFollowing)
 
-            HStack {
-                Button("← Test Left") {
-                    model.testR2TurnLeft()
-                }
-                .buttonStyle(.bordered)
-
-                Button("Test Forward ↑") {
-                    model.testR2Forward()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-
-                Button("Test Right →") {
-                    model.testR2TurnRight()
-                }
-                .buttonStyle(.bordered)
-            }
-            .disabled(!model.directBLE.isConnected || model.isFollowing)
-
-            Button(role: .destructive) {
-                model.stopR2CalibrationMotion()
-            } label: {
-                Label("Calibration Stop", systemImage: "stop.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .disabled(!model.directBLE.isConnected)
-
-            Toggle("Turn correction enabled", isOn: $model.directFollow.turnCorrectionEnabled)
+            Toggle("R2 alive while idle + walking", isOn: $model.directFollow.personalityEnabled)
                 .tint(.cyan)
-                .disabled(model.isFollowing)
 
-            Text("For the first calibration run, you can turn this OFF and walk straight. If R2 follows straight correctly, turn it back ON and tune turning separately.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Divider()
-
-            calibrationSlider(
-                "Follow delay",
-                value: $model.directFollow.shadowDelay,
-                range: 0.20...1.20,
-                step: 0.05,
-                valueText: String(format: "%.2f sec", model.directFollow.shadowDelay)
-            )
-
-            calibrationSlider(
-                "Forward speed",
-                value: $model.directFollow.driveSpeed,
-                range: 55...100,
-                step: 1,
-                valueText: String(format: "%.0f", model.directFollow.driveSpeed)
-            )
-
-            calibrationSlider(
-                "Forward distance",
-                value: $model.directFollow.secondsPerMeter,
-                range: 1.8...4.5,
-                step: 0.05,
-                valueText: String(format: "%.2f", model.directFollow.secondsPerMeter)
-            )
-
-            calibrationSlider(
-                "Turn speed",
-                value: $model.directFollow.turnSpeed,
-                range: 45...85,
-                step: 1,
-                valueText: String(format: "%.0f", model.directFollow.turnSpeed)
-            )
-
-            calibrationSlider(
-                "Turn dead zone",
-                value: $model.directFollow.turnDeadbandDegrees,
-                range: 10...35,
-                step: 1,
-                valueText: String(format: "%.0f°", model.directFollow.turnDeadbandDegrees)
-            )
-
-            calibrationSlider(
-                "Compass smoothing",
-                value: $model.directFollow.headingSmoothing,
-                range: 0.08...0.50,
-                step: 0.01,
-                valueText: String(format: "%.2f", model.directFollow.headingSmoothing)
-            )
-
-            Text("If R2 barely moves, raise Forward distance first. If he circles or keeps correcting, raise Turn dead zone or lower Turn speed. Keep Compass smoothing near the middle unless the heading is very jumpy.")
+            Text("Recommended: leave Turn correction OFF. The stock R2 Bluetooth connection can estimate proximity but cannot tell whether the phone is left, right, ahead, or behind.")
                 .font(.caption)
                 .foregroundStyle(.orange)
 
-            Button("Restore Recommended Calibration") {
-                model.resetFollowCalibration()
+            DisclosureGroup("Advanced steering — experimental", isExpanded: $showAdvancedFollow) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Turn correction enabled", isOn: $model.directFollow.turnCorrectionEnabled)
+                        .tint(.cyan)
+                        .disabled(model.isFollowing)
+
+                    Button {
+                        model.markR2AlignedWithPhone()
+                    } label: {
+                        Label("Align R2 + iPhone Heading", systemImage: "scope")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!model.directBLE.isConnected || model.isFollowing)
+
+                    HStack {
+                        Button("← Test Left") {
+                            model.testR2TurnLeft()
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Test Forward ↑") {
+                            model.testR2Forward()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+
+                        Button("Test Right →") {
+                            model.testR2TurnRight()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .disabled(!model.directBLE.isConnected || model.isFollowing)
+
+                    calibrationSlider(
+                        "Follow delay",
+                        value: $model.directFollow.shadowDelay,
+                        range: 0.20...1.20,
+                        step: 0.05,
+                        valueText: String(format: "%.2f sec", model.directFollow.shadowDelay)
+                    )
+
+                    calibrationSlider(
+                        "Forward speed",
+                        value: $model.directFollow.driveSpeed,
+                        range: 55...100,
+                        step: 1,
+                        valueText: String(format: "%.0f", model.directFollow.driveSpeed)
+                    )
+
+                    calibrationSlider(
+                        "Forward distance",
+                        value: $model.directFollow.secondsPerMeter,
+                        range: 1.8...4.5,
+                        step: 0.05,
+                        valueText: String(format: "%.2f", model.directFollow.secondsPerMeter)
+                    )
+
+                    calibrationSlider(
+                        "Turn speed",
+                        value: $model.directFollow.turnSpeed,
+                        range: 45...85,
+                        step: 1,
+                        valueText: String(format: "%.0f", model.directFollow.turnSpeed)
+                    )
+
+                    calibrationSlider(
+                        "Turn dead zone",
+                        value: $model.directFollow.turnDeadbandDegrees,
+                        range: 10...35,
+                        step: 1,
+                        valueText: String(format: "%.0f°", model.directFollow.turnDeadbandDegrees)
+                    )
+
+                    Button("Restore Recommended Settings") {
+                        model.resetFollowCalibration()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.isFollowing)
+                }
+                .padding(.top, 8)
             }
-            .buttonStyle(.bordered)
-            .disabled(model.isFollowing)
         }
     }
 
@@ -393,14 +391,11 @@ struct ContentView: View {
         card("FOLLOW CONTROL", icon: "figure.walk.motion") {
             if model.connectionMode == .directBluetooth {
                 Label(
-                    "Close Follow • ~0.35 sec trail • stabilized heading",
+                    "Phone Proximity Follow • approximate 2-ft stop",
                     systemImage: "bolt.horizontal.circle.fill"
                 )
                 .font(.caption)
                 .foregroundStyle(.green)
-
-                Toggle("R2 talks + lights while following", isOn: $model.directFollow.personalityEnabled)
-                    .tint(.cyan)
             }
 
             if model.isFollowing {
@@ -466,7 +461,7 @@ struct ContentView: View {
 
     private var safetyCard: some View {
         card("IMPORTANT", icon: "shield.lefthalf.filled") {
-            Text("Direct Bluetooth removes the Wi-Fi and Mac dependency, but it does not turn R2 into a true position-tracking robot. Follow still estimates your route from the iPhone. R2 cannot see stairs, pets, people, furniture, walls, curbs, or traffic. Test on a clear, flat, single-level area and stay close enough to stop R2 immediately.")
+            Text("Bluetooth proximity is approximate, not an exact 2-foot ruler, and stock R2 has no directional sensor that points toward the phone. With experimental turn correction OFF, R2 will not spin-chase compass noise, but he also cannot steer around corners toward the phone. R2 still cannot see stairs, pets, people, furniture, walls, curbs, or traffic.")
                 .font(.caption)
                 .foregroundStyle(.orange)
         }
