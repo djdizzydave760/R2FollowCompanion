@@ -492,7 +492,6 @@ final class FollowAppModel: ObservableObject {
 
         sequence = 0
         lastSentDistance = 0
-        motion.startTracking()
 
         switch connectionMode {
         case .directBluetooth:
@@ -511,13 +510,14 @@ final class FollowAppModel: ObservableObject {
             let directHeading: Double
             if directFollow.turnCorrectionEnabled {
                 guard let calibratedHeading else {
-                    motion.stopTracking()
                     status = "Align R2 + iPhone before using experimental turn correction"
                     return
                 }
+                motion.startTracking()
                 directHeading = calibratedHeading
             } else {
-                directHeading = motion.heading
+                // Pure BLE proximity mode needs no compass or pedometer.
+                directHeading = 0
             }
 
             directFollow.start(initialHeading: directHeading)
@@ -534,6 +534,7 @@ final class FollowAppModel: ObservableObject {
             beginTelemetryLoop()
 
         case .macBridge:
+            motion.startTracking()
             syncBridgeSettings()
 
             guard !macHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
