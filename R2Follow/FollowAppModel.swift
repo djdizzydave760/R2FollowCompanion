@@ -140,8 +140,6 @@ final class FollowAppModel: ObservableObject {
             backpackReactionChance = UserDefaults.standard.double(forKey: "backpackReactionChance")
             backpackHeadAmount = UserDefaults.standard.double(forKey: "backpackHeadAmount")
             backpackLightIntensity = UserDefaults.standard.double(forKey: "backpackLightIntensity")
-        } else {
-            applyPersonalityDefaults()
         }
 
         if UserDefaults.standard.object(
@@ -153,6 +151,10 @@ final class FollowAppModel: ObservableObject {
                 UserDefaults.standard.bool(
                     forKey: "externalAudioEnabled"
                 )
+        }
+
+        if !hasBackpackTuning {
+            applyPersonalityDefaults()
         }
 
         syncBridgeSettings()
