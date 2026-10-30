@@ -2,6 +2,12 @@ import Foundation
 import AVFoundation
 import Combine
 
+struct R2SoundPlayback {
+    let url: URL
+    let profile: R2SoundProfile?
+    let displayName: String
+}
+
 @MainActor
 final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var isRunning = false
@@ -10,9 +16,12 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
     @Published private(set) var isBluetoothA2DP = false
     @Published private(set) var outputVolume: Float = 0
 
+    @Published private(set) var bundledSoundCount = 0
     @Published private(set) var importedSoundCount = 0
     @Published private(set) var importedSoundNames: [String] = []
     @Published private(set) var lastPackSound = "None"
+
+    @Published var packVolume = 0.92
 
     private let engine = AVAudioEngine()
     private let ambientNode = AVAudioPlayerNode()
@@ -27,17 +36,18 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
     private var interruptionObserver: NSObjectProtocol?
     private var mediaResetObserver: NSObjectProtocol?
 
-    private var packURLs: [URL] = []
-    private var shuffledPackDeck: [URL] = []
+    private var manifestProfiles: [String: R2SoundProfile] = [:]
+    private var bundledURLs: [URL] = []
+    private var importedURLs: [URL] = []
+    private var shuffledDeck: [URL] = []
     private var lastPackURL: URL?
     private var packPlayer: AVAudioPlayer?
 
     private var soundPackFolder: URL {
-        let base =
-            FileManager.default.urls(
-                for: .documentDirectory,
-                in: .userDomainMask
-            )[0]
+        let base = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        )[0]
 
         return base.appendingPathComponent(
             "R2SoundPack",
@@ -49,7 +59,8 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
         super.init()
 
         ensureSoundPackFolder()
-        reloadSoundPack()
+        reloadBundledBatch()
+        reloadImportedSoundPack()
 
         routeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
@@ -71,13 +82,8 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
                 guard
                     let self,
                     let info = notification.userInfo,
-                    let rawType =
-                        info[AVAudioSessionInterruptionTypeKey]
-                        as? UInt,
-                    let type =
-                        AVAudioSession.InterruptionType(
-                            rawValue: rawType
-                        )
+                    let rawType = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+                    let type = AVAudioSession.InterruptionType(rawValue: rawType)
                 else {
                     return
                 }
@@ -97,16 +103,16 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
         }
 
         mediaResetObserver = NotificationCenter.default.addObserver(
-            forName:
-                AVAudioSession.mediaServicesWereResetNotification,
+            forName: AVAudioSession.mediaServicesWereResetNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.configured = false
-                self?.activatePlaybackSession()
-                self?.configureEngineIfNeeded()
-                self?.restartEngineIfNeeded()
+                guard let self else { return }
+                self.configured = false
+                self.activatePlaybackSession()
+                self.configureEngineIfNeeded()
+                self.restartEngineIfNeeded()
             }
         }
     }
@@ -114,13 +120,19 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
     deinit {
         [routeObserver, interruptionObserver, mediaResetObserver]
             .compactMap { $0 }
-            .forEach {
-                NotificationCenter.default.removeObserver($0)
-            }
+            .forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
+    var hasBundledSoundBatch: Bool {
+        !bundledURLs.isEmpty
     }
 
     var hasImportedSoundPack: Bool {
-        !packURLs.isEmpty
+        !importedURLs.isEmpty
+    }
+
+    var totalAvailablePackSounds: Int {
+        bundledURLs.count + importedURLs.count
     }
 
     func start() {
@@ -130,15 +142,9 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
         refreshRoute()
 
         if isRunning {
-            if hasImportedSoundPack {
-                status =
-                    isBluetoothA2DP
-                    ? "JBL sound pack ready • \(importedSoundCount) sounds"
-                    : "Sound pack ready • output is not Bluetooth A2DP"
-            } else {
-                status =
-                    "No imported sound pack • R2 internal sounds will be used"
-            }
+            status = isBluetoothA2DP
+                ? "JBL sound batch ready • \(totalAvailablePackSounds) sounds"
+                : "Sound batch ready • output is not Bluetooth A2DP"
         }
     }
 
@@ -166,8 +172,7 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
         var skipped = 0
 
         for sourceURL in urls {
-            let accessed =
-                sourceURL.startAccessingSecurityScopedResource()
+            let accessed = sourceURL.startAccessingSecurityScopedResource()
 
             defer {
                 if accessed {
@@ -175,36 +180,29 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
                 }
             }
 
-            let ext =
-                sourceURL.pathExtension.lowercased()
-
-            let allowed =
-                ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf"]
+            let ext = sourceURL.pathExtension.lowercased()
+            let allowed = ["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf"]
 
             guard allowed.contains(ext) else {
                 skipped += 1
                 continue
             }
 
-            let cleanName =
-                sourceURL.deletingPathExtension()
+            let cleanName = sourceURL
+                .deletingPathExtension()
                 .lastPathComponent
                 .replacingOccurrences(of: "/", with: "-")
 
-            var destination =
-                soundPackFolder.appendingPathComponent(
-                    "\(cleanName).\(ext)"
-                )
+            var destination = soundPackFolder.appendingPathComponent(
+                "\(cleanName).\(ext)"
+            )
 
             var suffix = 2
 
-            while FileManager.default.fileExists(
-                atPath: destination.path
-            ) {
-                destination =
-                    soundPackFolder.appendingPathComponent(
-                        "\(cleanName)-\(suffix).\(ext)"
-                    )
+            while FileManager.default.fileExists(atPath: destination.path) {
+                destination = soundPackFolder.appendingPathComponent(
+                    "\(cleanName)-\(suffix).\(ext)"
+                )
                 suffix += 1
             }
 
@@ -213,110 +211,105 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
                     at: sourceURL,
                     to: destination
                 )
-
                 imported += 1
             } catch {
                 skipped += 1
             }
         }
 
-        reloadSoundPack()
+        reloadImportedSoundPack()
 
         if imported > 0 {
             status =
-                "Imported \(imported) R2 sound file\(imported == 1 ? "" : "s")" +
+                "Imported \(imported) sound file\(imported == 1 ? "" : "s")" +
                 (skipped > 0 ? " • \(skipped) skipped" : "")
         } else {
-            status =
-                skipped > 0
+            status = skipped > 0
                 ? "No supported audio files were imported"
                 : "No files selected"
         }
     }
 
-    func clearSoundPack() {
+    func clearImportedSoundPack() {
         packPlayer?.stop()
         packPlayer = nil
-
         ensureSoundPackFolder()
 
-        if let files =
-            try? FileManager.default.contentsOfDirectory(
-                at: soundPackFolder,
-                includingPropertiesForKeys: nil
-            ) {
-
+        if let files = try? FileManager.default.contentsOfDirectory(
+            at: soundPackFolder,
+            includingPropertiesForKeys: nil
+        ) {
             for file in files {
                 try? FileManager.default.removeItem(at: file)
             }
         }
 
-        reloadSoundPack()
+        reloadImportedSoundPack()
         lastPackSound = "None"
-        status = "Imported sound pack cleared"
+        status = "Imported sounds cleared • bundled Sound Batch remains"
     }
 
     @discardableResult
-    func playNextPackSound() -> Bool {
+    func playNextPackSound() -> R2SoundPlayback? {
         activatePlaybackSession()
         refreshRoute()
 
-        guard !packURLs.isEmpty else {
-            status =
-                "No imported sound pack • using R2 internal sounds"
-            return false
+        let available = bundledURLs + importedURLs
+
+        guard !available.isEmpty else {
+            status = "No bundled or imported sound batch available"
+            return nil
         }
 
-        if shuffledPackDeck.isEmpty {
-            var deck = packURLs.shuffled()
+        if shuffledDeck.isEmpty {
+            var deck = available.shuffled()
 
             if let lastPackURL,
                deck.count > 1,
                deck.last == lastPackURL {
-
-                deck.swapAt(
-                    deck.count - 1,
-                    deck.count - 2
-                )
+                deck.swapAt(deck.count - 1, deck.count - 2)
             }
 
-            shuffledPackDeck = deck
+            shuffledDeck = deck
         }
 
-        guard let url = shuffledPackDeck.popLast() else {
-            return false
+        guard let url = shuffledDeck.popLast() else {
+            return nil
         }
 
         do {
             packPlayer?.stop()
 
-            let player =
-                try AVAudioPlayer(contentsOf: url)
-
+            let player = try AVAudioPlayer(contentsOf: url)
             player.delegate = self
-            player.volume = 1.0
+            player.volume = Float(max(0.05, min(1.0, packVolume)))
             player.prepareToPlay()
 
             guard player.play() else {
                 status = "Could not play \(url.lastPathComponent)"
-                return false
+                return nil
             }
 
             packPlayer = player
             lastPackURL = url
-            lastPackSound =
-                url.deletingPathExtension().lastPathComponent
 
-            status =
-                isBluetoothA2DP
-                ? "JBL PACK • \(lastPackSound)"
-                : "PACK PLAYING • \(routeDescription)"
+            let name = url.deletingPathExtension().lastPathComponent
+            lastPackSound = name
 
-            return true
+            let profile = manifestProfiles[url.lastPathComponent]
+
+            status = isBluetoothA2DP
+                ? "JBL SOUND • \(name)"
+                : "SOUND PLAYING • \(routeDescription)"
+
+            return R2SoundPlayback(
+                url: url,
+                profile: profile,
+                displayName: name
+            )
         } catch {
-            status =
-                "Pack sound error: \(error.localizedDescription)"
-            return false
+            status = "Sound playback error: \(error.localizedDescription)"
+            return nil
         }
     }
 
@@ -334,40 +327,26 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
         effectNode.stop()
         effectNode.play()
 
-        let first =
-            makeTestToneBuffer(
-                frequency: 720,
-                duration: 0.42,
-                level: 0.75
-            )
-
-        let second =
-            makeTestToneBuffer(
-                frequency: 1_080,
-                duration: 0.42,
-                level: 0.75
-            )
-
-        effectNode.scheduleBuffer(
-            first,
-            at: nil,
-            options: [],
-            completionHandler: nil
+        let first = makeTestToneBuffer(
+            frequency: 720,
+            duration: 0.42,
+            level: 0.75
         )
 
-        effectNode.scheduleBuffer(
-            second,
-            at: nil,
-            options: [],
-            completionHandler: nil
+        let second = makeTestToneBuffer(
+            frequency: 1_080,
+            duration: 0.42,
+            level: 0.75
         )
+
+        effectNode.scheduleBuffer(first)
+        effectNode.scheduleBuffer(second)
 
         if !effectNode.isPlaying {
             effectNode.play()
         }
 
-        status =
-            isBluetoothA2DP
+        status = isBluetoothA2DP
             ? "LOUD ROUTE TEST → \(routeDescription)"
             : "TEST NOT ROUTED TO BLUETOOTH • \(routeDescription)"
     }
@@ -384,13 +363,11 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
             return
         }
 
-        isBluetoothA2DP =
-            outputs.contains {
-                $0.portType == .bluetoothA2DP
-            }
+        isBluetoothA2DP = outputs.contains {
+            $0.portType == .bluetoothA2DP
+        }
 
-        routeDescription =
-            outputs
+        routeDescription = outputs
             .map { output in
                 let friendlyType: String
 
@@ -409,8 +386,7 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
                     friendlyType = output.portType.rawValue
                 }
 
-                return
-                    "\(output.portName) • \(friendlyType)"
+                return "\(output.portName) • \(friendlyType)"
             }
             .joined(separator: ", ")
     }
@@ -424,6 +400,42 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
         }
     }
 
+    private func reloadBundledBatch() {
+        manifestProfiles.removeAll()
+        bundledURLs.removeAll()
+
+        guard
+            let manifestURL = Bundle.main.url(
+                forResource: "SoundBatchManifest",
+                withExtension: "json",
+                subdirectory: "SoundBatch"
+            ),
+            let data = try? Data(contentsOf: manifestURL),
+            let manifest = try? JSONDecoder().decode(
+                R2SoundBatchManifest.self,
+                from: data
+            )
+        else {
+            bundledSoundCount = 0
+            return
+        }
+
+        for profile in manifest.sounds {
+            manifestProfiles[profile.file] = profile
+
+            if let url = Bundle.main.url(
+                forResource: profile.file,
+                withExtension: nil,
+                subdirectory: "SoundBatch"
+            ) {
+                bundledURLs.append(url)
+            }
+        }
+
+        bundledSoundCount = bundledURLs.count
+        shuffledDeck.removeAll()
+    }
+
     private func ensureSoundPackFolder() {
         try? FileManager.default.createDirectory(
             at: soundPackFolder,
@@ -431,45 +443,34 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
         )
     }
 
-    private func reloadSoundPack() {
+    private func reloadImportedSoundPack() {
         ensureSoundPackFolder()
 
-        let allowed =
-            Set(["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf"])
+        let allowed = Set(["wav", "mp3", "m4a", "aac", "aif", "aiff", "caf"])
 
-        let files =
-            (try? FileManager.default.contentsOfDirectory(
-                at: soundPackFolder,
-                includingPropertiesForKeys: nil
-            )) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: soundPackFolder,
+            includingPropertiesForKeys: nil
+        )) ?? []
 
-        packURLs =
-            files
+        importedURLs = files
             .filter {
-                allowed.contains(
-                    $0.pathExtension.lowercased()
-                )
+                allowed.contains($0.pathExtension.lowercased())
             }
             .sorted {
-                $0.lastPathComponent
-                    .localizedCaseInsensitiveCompare(
-                        $1.lastPathComponent
-                    ) == .orderedAscending
+                $0.lastPathComponent.localizedCaseInsensitiveCompare(
+                    $1.lastPathComponent
+                ) == .orderedAscending
             }
 
-        importedSoundCount = packURLs.count
-        importedSoundNames =
-            packURLs.map {
-                $0.lastPathComponent
-            }
-
-        shuffledPackDeck.removeAll()
+        importedSoundCount = importedURLs.count
+        importedSoundNames = importedURLs.map(.lastPathComponent)
+        shuffledDeck.removeAll()
     }
 
     private func activatePlaybackSession() {
         do {
-            let session =
-                AVAudioSession.sharedInstance()
+            let session = AVAudioSession.sharedInstance()
 
             try session.setCategory(
                 .playback,
@@ -481,8 +482,7 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
             refreshRoute()
         } catch {
             isRunning = false
-            status =
-                "Audio session error: \(error.localizedDescription)"
+            status = "Audio session error: \(error.localizedDescription)"
         }
     }
 
@@ -504,12 +504,10 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
             format: format
         )
 
-        // A nearly inaudible continuous audio bed keeps the playback session
-        // active during locked-screen Backpack Mode.
-        ambientNode.volume = 0.08
+        // Keep the background audio session alive at a barely audible level.
+        ambientNode.volume = 0.025
         effectNode.volume = 1.0
         engine.mainMixerNode.outputVolume = 1.0
-
         configured = true
     }
 
@@ -531,7 +529,6 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
                     options: .loops,
                     completionHandler: nil
                 )
-
                 ambientNode.play()
             }
 
@@ -542,39 +539,31 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
             isRunning = engine.isRunning
         } catch {
             isRunning = false
-            status =
-                "Audio engine error: \(error.localizedDescription)"
+            status = "Audio engine error: \(error.localizedDescription)"
         }
     }
 
     private func makeAmbientBuffer() -> AVAudioPCMBuffer {
         let sampleRate = format.sampleRate
         let seconds = 4.0
-        let frameCount =
-            AVAudioFrameCount(sampleRate * seconds)
+        let frameCount = AVAudioFrameCount(sampleRate * seconds)
 
-        let buffer =
-            AVAudioPCMBuffer(
-                pcmFormat: format,
-                frameCapacity: frameCount
-            )!
+        let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: frameCount
+        )!
 
         buffer.frameLength = frameCount
 
-        guard let channel =
-            buffer.floatChannelData?[0] else {
+        guard let channel = buffer.floatChannelData?[0] else {
             return buffer
         }
 
         for frame in 0..<Int(frameCount) {
-            let time =
-                Double(frame) / sampleRate
-
-            channel[frame] =
-                Float(
-                    0.010 *
-                    sin(2.0 * .pi * 96.0 * time)
-                )
+            let time = Double(frame) / sampleRate
+            channel[frame] = Float(
+                0.003 * sin(2.0 * .pi * 96.0 * time)
+            )
         }
 
         return buffer
@@ -586,51 +575,33 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
         level: Double
     ) -> AVAudioPCMBuffer {
         let sampleRate = format.sampleRate
-        let frameCount =
-            AVAudioFrameCount(
-                sampleRate * duration
-            )
+        let frameCount = AVAudioFrameCount(sampleRate * duration)
 
-        let buffer =
-            AVAudioPCMBuffer(
-                pcmFormat: format,
-                frameCapacity: frameCount
-            )!
+        let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: frameCount
+        )!
 
         buffer.frameLength = frameCount
 
-        guard let channel =
-            buffer.floatChannelData?[0] else {
+        guard let channel = buffer.floatChannelData?[0] else {
             return buffer
         }
 
         for frame in 0..<Int(frameCount) {
-            let time =
-                Double(frame) / sampleRate
+            let time = Double(frame) / sampleRate
+            let progress = time / duration
 
-            let progress =
-                time / duration
+            let envelope = min(
+                min(progress / 0.04, (1.0 - progress) / 0.08),
+                1.0
+            )
 
-            let envelope =
-                min(
-                    min(
-                        progress / 0.04,
-                        (1.0 - progress) / 0.08
-                    ),
-                    1.0
-                )
-
-            channel[frame] =
-                Float(
-                    max(0, envelope) *
-                    level *
-                    sin(
-                        2.0 *
-                        .pi *
-                        frequency *
-                        time
-                    )
-                )
+            channel[frame] = Float(
+                max(0, envelope) *
+                level *
+                sin(2.0 * .pi * frequency * time)
+            )
         }
 
         return buffer
