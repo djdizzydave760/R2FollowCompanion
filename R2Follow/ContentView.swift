@@ -14,17 +14,24 @@ struct ContentView: View {
 
                     if model.connectionMode == .directBluetooth {
                         directBluetoothCard
-                        r2CalibrationCard
+                        r2ModeCard
+
+                        if model.operationMode == .hybridFollow {
+                            r2CalibrationCard
+                            setupCard
+                        }
                     } else {
                         connectionCard
-                    }
-
-                    if model.connectionMode == .macBridge || model.directFollow.turnCorrectionEnabled {
                         setupCard
                     }
 
                     voiceCard
-                    followCard
+
+                    if model.connectionMode == .macBridge ||
+                       model.operationMode == .hybridFollow {
+                        followCard
+                    }
+
                     telemetryCard
                     safetyCard
                 }
@@ -174,19 +181,84 @@ struct ContentView: View {
         }
     }
 
+    private var r2ModeCard: some View {
+        card("R2 MODE + PERSONALITY", icon: "sparkles") {
+            Picker("R2 Mode", selection: $model.operationMode) {
+                ForEach(R2OperationMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Picker("Personality", selection: $model.personalityMode) {
+                ForEach(R2PersonalityMode.allCases) { personality in
+                    Text(personality.rawValue).tag(personality)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Toggle(
+                "Head movement + sounds + natural lights",
+                isOn: $model.directFollow.personalityEnabled
+            )
+            .tint(.cyan)
+
+            if model.operationMode == .backpack {
+                Label(
+                    "BACKPACK SAFE • wheel motors physically locked by the app",
+                    systemImage: "lock.shield.fill"
+                )
+                .font(.caption.monospaced().bold())
+                .foregroundStyle(.green)
+
+                Text("R2 can turn his dome, chirp, react to voice commands and blink his lights, but all wheel/drive commands are blocked.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Label(
+                    "HYBRID FOLLOW • GPS path + motion + Bluetooth spacing",
+                    systemImage: "location.north.line.fill"
+                )
+                .font(.caption.monospaced().bold())
+                .foregroundStyle(.green)
+
+                Text("R2 replays your walking direction from GPS course and motion while Bluetooth acts as the close-range 3–4 ft brake.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                switch model.personalityMode {
+                case .relaxed:
+                    Text("Relaxed • slower head glances, occasional chirps, gentle light activity")
+                case .excited:
+                    Text("Excited • frequent head movement, more talking and lively lights")
+                case .patrol:
+                    Text("On Patrol • frequent scanning head movement, alert-style responses and active lights")
+                case .curious:
+                    Text("Curious • lots of head glances and conversational reactions")
+                case .quiet:
+                    Text("Quiet • head and lights stay alive with very little talking")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.cyan)
+        }
+    }
+
     private var r2CalibrationCard: some View {
-        card("PHONE PROXIMITY FOLLOW", icon: "iphone.radiowaves.left.and.right") {
-            Text("Simple mode: Bluetooth measures how close your iPhone is to R2. Put the phone exactly 2 ft from R2 and save that signal level. R2 will stop when the signal reaches that calibrated point.")
+        card("HYBRID FOLLOW CALIBRATION", icon: "iphone.radiowaves.left.and.right") {
+            Text("Put the iPhone about 3.5 ft from R2 and save the Bluetooth signal as the target gap. Outdoors, GPS course supplies the walking path; motion fills short gaps; Bluetooth prevents R2 from getting too close.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             metric("Live Bluetooth", String(format: "%.0f dBm", model.directBLE.smoothedRSSI))
-            metric("2-ft calibration", model.directFollow.proximityState)
+            metric("3.5-ft target", model.directFollow.proximityState)
 
             Button {
                 model.calibrateTwoFootStop()
             } label: {
-                Label("Set Current Phone Position as 2 ft", systemImage: "ruler.fill")
+                Label("Set Current Phone Position as 3.5 ft", systemImage: "ruler.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -196,11 +268,11 @@ struct ContentView: View {
             Toggle("R2 alive while idle + walking", isOn: $model.directFollow.personalityEnabled)
                 .tint(.cyan)
 
-            Text("Recommended: leave Turn correction OFF. The stock R2 Bluetooth connection can estimate proximity but cannot tell whether the phone is left, right, ahead, or behind.")
+            Text("Hybrid steering uses GPS course, not pocket-compass chasing. If GPS becomes weak, R2 holds the last reliable path direction instead of repeatedly spinning for compass corrections.")
                 .font(.caption)
                 .foregroundStyle(.orange)
 
-            DisclosureGroup("Advanced steering — experimental", isExpanded: $showAdvancedFollow) {
+            DisclosureGroup("Advanced Hybrid Follow tuning", isExpanded: $showAdvancedFollow) {
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle("Turn correction enabled", isOn: $model.directFollow.turnCorrectionEnabled)
                         .tint(.cyan)
@@ -240,6 +312,14 @@ struct ContentView: View {
                         range: 0.20...1.20,
                         step: 0.05,
                         valueText: String(format: "%.2f sec", model.directFollow.shadowDelay)
+                    )
+
+                    calibrationSlider(
+                        "Path trail distance",
+                        value: $model.directFollow.trailDistanceMeters,
+                        range: 0.75...1.80,
+                        step: 0.05,
+                        valueText: String(format: "%.2f m", model.directFollow.trailDistanceMeters)
                     )
 
                     calibrationSlider(
@@ -315,31 +395,55 @@ struct ContentView: View {
     }
 
     private var setupCard: some View {
-        card("CALIBRATE", icon: "safari") {
-            Text("First enable iPhone sensors. For Direct Bluetooth Follow, put R2 about 3 ft behind you with his body facing exactly the same direction you are facing.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        card("PHONE TRACKING", icon: "location.fill") {
+            Text(
+                model.connectionMode == .directBluetooth
+                    ? "Hybrid Follow uses GPS course + Motion & Fitness. You no longer need to keep the iPhone pointed like a compass."
+                    : "Mac Bridge mode still uses the original motion/heading calibration."
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
 
-            Button("Enable iPhone Sensors") {
+            Button(
+                model.connectionMode == .directBluetooth
+                    ? "Enable GPS + Motion Tracking"
+                    : "Enable iPhone Sensors"
+            ) {
                 model.requestPermissions()
             }
             .buttonStyle(.borderedProminent)
             .tint(.blue)
 
-            Text("1. Hold the iPhone upright with its top edge pointing forward.\n2. Tap Calibrate Forward.\n3. Put the phone in your pocket in a consistent top-up orientation.\n4. Start Follow and walk slowly.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            if model.connectionMode == .directBluetooth {
+                metric("GPS", model.motion.gpsStatus)
+                metric(
+                    "GPS accuracy",
+                    model.motion.horizontalAccuracy >= 0
+                        ? String(format: "±%.1f m", model.motion.horizontalAccuracy)
+                        : "—"
+                )
+                metric(
+                    "GPS course",
+                    model.motion.course >= 0
+                        ? String(format: "%.0f°", model.motion.course)
+                        : "—"
+                )
 
-            Button("Calibrate Forward") {
-                model.calibrate()
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.cyan)
+                Text("Best results are outdoors with a clear view of the sky. Start R2 behind you facing the same general direction, then walk several feet so the phone can establish a GPS course.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else {
+                Button("Calibrate Forward") {
+                    model.calibrate()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
 
-            if let heading = model.calibratedHeading {
-                Text("Reference heading: \(Int(heading.rounded()))°")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.cyan)
+                if let heading = model.calibratedHeading {
+                    Text("Reference heading: \(Int(heading.rounded()))°")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.cyan)
+                }
             }
         }
     }
@@ -402,7 +506,7 @@ struct ContentView: View {
         card("FOLLOW CONTROL", icon: "figure.walk.motion") {
             if model.connectionMode == .directBluetooth {
                 Label(
-                    "Phone Proximity Follow • approximate 2-ft stop",
+                    "Hybrid Follow • GPS breadcrumbs • ~3–4 ft Bluetooth brake",
                     systemImage: "bolt.horizontal.circle.fill"
                 )
                 .font(.caption)
@@ -458,8 +562,25 @@ struct ContentView: View {
             metric("Sequence", "\(model.sequence)")
 
             if model.connectionMode == .directBluetooth {
+                metric("Operation", model.operationMode.rawValue)
+                metric("Personality", model.personalityMode.rawValue)
                 metric("Direct Follow", model.directFollow.state)
-                metric("Filtered turn", String(format: "%.0f°", model.directFollow.filteredHeading))
+                metric("Tracking", model.directFollow.trackingQuality)
+                metric("Bluetooth", String(format: "%.0f dBm", model.directBLE.smoothedRSSI))
+                metric("GPS", model.motion.gpsStatus)
+                metric(
+                    "GPS accuracy",
+                    model.motion.horizontalAccuracy >= 0
+                        ? String(format: "±%.1f m", model.motion.horizontalAccuracy)
+                        : "—"
+                )
+                metric(
+                    "GPS course",
+                    model.motion.course >= 0
+                        ? String(format: "%.0f°", model.motion.course)
+                        : "—"
+                )
+                metric("Filtered path turn", String(format: "%.0f°", model.directFollow.filteredHeading))
                 metric("Heading error", String(format: "%.0f°", model.directFollow.headingError))
                 metric("Drive queued", String(format: "%.2f m", model.directFollow.queuedDistance))
             }
@@ -472,7 +593,7 @@ struct ContentView: View {
 
     private var safetyCard: some View {
         card("IMPORTANT", icon: "shield.lefthalf.filled") {
-            Text("Bluetooth proximity is approximate, not an exact 2-foot ruler, and stock R2 has no directional sensor that points toward the phone. With experimental turn correction OFF, R2 will not spin-chase compass noise, but he also cannot steer around corners toward the phone. R2 still cannot see stairs, pets, people, furniture, walls, curbs, or traffic.")
+            Text("Hybrid Follow improves path direction outdoors, but the stock R2 still has no GPS/UWB sensor of his own. The phone estimates the path and R2 dead-reckons through motor commands; Bluetooth spacing is approximate. Backpack Mode hard-locks the wheel motors. R2 cannot detect stairs, curbs, people, pets, walls, furniture, vehicles or traffic.")
                 .font(.caption)
                 .foregroundStyle(.orange)
         }
