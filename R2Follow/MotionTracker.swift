@@ -31,6 +31,7 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
     private var lastAcceleration = 0.0
     private var lastMotionActivityAt = Date.distantPast
     private var latestLocationTimestamp = Date.distantPast
+    private var backgroundActivitySession: CLBackgroundActivitySession?
     private var lastBreadcrumb: CLLocation?
     private var latestBreadcrumbTimestamp = Date.distantPast
 
@@ -93,8 +94,15 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
     }
 
     func startBackgroundFollowSession() {
-        // This must only be enabled while a user-started Follow session is active.
-        // The app declares UIBackgroundModes/location in Info.plist.
+        // This is only active during a user-started Follow session.
+        // CLBackgroundActivitySession keeps When-In-Use location eligible for
+        // timely background delivery while the screen is locked.
+        if #available(iOS 17.0, *) {
+            if backgroundActivitySession == nil {
+                backgroundActivitySession = CLBackgroundActivitySession()
+            }
+        }
+
         location.allowsBackgroundLocationUpdates = true
         location.showsBackgroundLocationIndicator = true
         location.pausesLocationUpdatesAutomatically = false
@@ -103,6 +111,11 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
     }
 
     func stopBackgroundFollowSession() {
+        if #available(iOS 17.0, *) {
+            backgroundActivitySession?.invalidate()
+            backgroundActivitySession = nil
+        }
+
         location.allowsBackgroundLocationUpdates = false
         location.showsBackgroundLocationIndicator = false
     }
