@@ -276,6 +276,21 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
 
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Choose Audio Output")
+                            .font(.callout.bold())
+                        Text("Tap the route button and select JBL Clip 5")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    SystemAudioRoutePicker()
+                        .frame(width: 46, height: 36)
+                }
+
                 if !model.externalAudio.isBluetoothA2DP {
                     Text("JBL is not the active media output. Open iPhone Control Center → tap the audio output/AirPlay button → select JBL Clip 5, then return here and tap Refresh / Check Audio Route.")
                         .font(.caption)
