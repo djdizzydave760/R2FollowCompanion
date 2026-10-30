@@ -15,6 +15,46 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Restore bundled Sound Batch and app icon
+        run: |
+          set -euo pipefail
+
+          mkdir -p R2Follow/Resources/SoundBatch
+          cat BuildAssets/SoundBatch.part*.b64 | tr -d '\n' | base64 --decode > /tmp/R2SoundBatch.zip
+          unzip -oq /tmp/R2SoundBatch.zip -d R2Follow/Resources/SoundBatch
+
+          mkdir -p R2Follow/Assets.xcassets/AppIcon.appiconset
+          cat BuildAssets/AppIcon.part*.b64 | tr -d '\n' | base64 --decode > R2Follow/Assets.xcassets/AppIcon.appiconset/AppIcon1024.png
+
+          cat > R2Follow/Assets.xcassets/Contents.json <<'JSON'
+          {
+            "info": {
+              "author": "xcode",
+              "version": 1
+            }
+          }
+          JSON
+
+          cat > R2Follow/Assets.xcassets/AppIcon.appiconset/Contents.json <<'JSON'
+          {
+            "images": [
+              {
+                "filename": "AppIcon1024.png",
+                "idiom": "universal",
+                "platform": "ios",
+                "size": "1024x1024"
+              }
+            ],
+            "info": {
+              "author": "xcode",
+              "version": 1
+            }
+          }
+          JSON
+
+          test -f R2Follow/Resources/SoundBatch/SoundBatchManifest.json
+          test -f R2Follow/Assets.xcassets/AppIcon.appiconset/AppIcon1024.png
+
       - name: Generate Xcode project
         run: xcodegen generate
 
