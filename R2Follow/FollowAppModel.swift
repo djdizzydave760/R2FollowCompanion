@@ -40,6 +40,10 @@ final class FollowAppModel: ObservableObject {
 
     private var sessionID = UUID().uuidString
     private var sendTimer: Timer?
+    private var lifeTimer: Timer?
+    private var nextIdleBlink = Date.distantPast
+    private var nextIdleHead = Date.distantPast
+    private var nextIdleChirp = Date.distantPast
     private var lastSentDistance = 0.0
     private var cancellables = Set<AnyCancellable>()
 
@@ -86,6 +90,8 @@ final class FollowAppModel: ObservableObject {
                 self.stopLocalFollowAfterBluetoothLoss()
             }
         }
+
+        beginDroidLifeLoop()
     }
 
     func syncBridgeSettings() {
@@ -134,7 +140,65 @@ final class FollowAppModel: ObservableObject {
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
     }
 
+    // MARK: - Always-on R2 personality
+
+    private func beginDroidLifeLoop() {
+        lifeTimer?.invalidate()
+        nextIdleBlink = Date().addingTimeInterval(0.8)
+        nextIdleHead = Date().addingTimeInterval(2.0)
+        nextIdleChirp = Date().addingTimeInterval(4.0)
+
+        lifeTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
+            guard let self else { return }
+
+            Task { @MainActor in
+                guard self.connectionMode == .directBluetooth,
+                      self.directBLE.isConnected,
+                      !self.isFollowing else {
+                    return
+                }
+
+                let now = Date()
+
+                if now >= self.nextIdleBlink {
+                    self.directBLE.naturalFollowBlink()
+                    self.nextIdleBlink = now.addingTimeInterval(Double.random(in: 0.7...2.2))
+                }
+
+                if now >= self.nextIdleHead {
+                    self.directBLE.ambientDomeGlance()
+                    self.nextIdleHead = now.addingTimeInterval(Double.random(in: 2.5...5.5))
+                }
+
+                if now >= self.nextIdleChirp {
+                    self.directBLE.chirp(bank: 1)
+                    self.nextIdleChirp = now.addingTimeInterval(Double.random(in: 5.0...10.0))
+                }
+            }
+        }
+    }
+
     // MARK: - R2 pre-follow calibration
+
+    func calibrateTwoFootStop() {
+        guard connectionMode == .directBluetooth, directBLE.isConnected else {
+            status = "Connect R2 directly over Bluetooth first"
+            return
+        }
+
+        let value = directBLE.smoothedRSSI
+        guard value < 0, value > -120 else {
+            status = "Waiting for a stable Bluetooth distance reading"
+            return
+        }
+
+        directFollow.calibrateTwoFootStop(usingRSSI: value)
+        status = String(
+            format: "2-FOOT STOP SET • %.0f dBm • keep phone position consistent",
+            value
+        )
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
 
     func markR2AlignedWithPhone() {
         guard connectionMode == .directBluetooth else {
@@ -440,6 +504,12 @@ final class FollowAppModel: ObservableObject {
             guard directBLE.isConnected else {
                 motion.stopTracking()
                 status = "Connect directly to R2 over Bluetooth first"
+                return
+            }
+
+            guard directFollow.twoFootRSSI != nil else {
+                motion.stopTracking()
+                status = "Set the 2-foot Bluetooth stop distance before starting Follow"
                 return
             }
 
