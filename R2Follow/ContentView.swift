@@ -125,6 +125,14 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+
+                Button {
+                    model.testR2HeadAndVoice()
+                } label: {
+                    Label("Test Head + Voice", systemImage: "waveform.and.person.filled")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             } else {
                 Button {
                     model.scanForR2()
