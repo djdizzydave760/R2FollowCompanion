@@ -696,6 +696,7 @@ final class FollowAppModel: ObservableObject {
 
             directBLE.setDriveLocked(false)
             motion.startTracking()
+            motion.startBackgroundFollowSession()
 
             // Hybrid Follow learns the walking direction from the first good
             // GPS course. No pocket compass alignment is required.
@@ -707,8 +708,8 @@ final class FollowAppModel: ObservableObject {
             }
 
             isFollowing = true
-            UIApplication.shared.isIdleTimerDisabled = true
-            status = "HYBRID FOLLOW • GPS path + motion + Bluetooth gap"
+            UIApplication.shared.isIdleTimerDisabled = false
+            status = "HYBRID FOLLOW • background GPS + Bluetooth active • screen may lock"
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             beginTelemetryLoop()
 
@@ -753,7 +754,7 @@ final class FollowAppModel: ObservableObject {
                 )
 
                 isFollowing = true
-                UIApplication.shared.isIdleTimerDisabled = true
+                UIApplication.shared.isIdleTimerDisabled = false
                 status = "MAC BRIDGE FOLLOWING"
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 beginTelemetryLoop()
@@ -799,16 +800,34 @@ final class FollowAppModel: ObservableObject {
     }
 
     func appDidEnterBackground() {
-        guard isFollowing else {
-            if connectionMode == .directBluetooth {
-                directBLE.emergencyStop()
-            }
+        // Direct Hybrid Follow is intentionally allowed to continue after the
+        // screen dims/locks. Core Location background mode keeps the active
+        // user-started tracking session alive and Core Bluetooth is declared
+        // for central-role background communication.
+        if isFollowing,
+           connectionMode == .directBluetooth,
+           operationMode == .hybridFollow {
+
+            status = "BACKGROUND FOLLOW ACTIVE • screen locked is OK"
             return
         }
 
-        Task { @MainActor in
-            await emergencyStop()
-            status = "Follow stopped because the app left the foreground"
+        // Mac Bridge depends on foreground networking/timers and is not safe to
+        // continue blindly when iOS backgrounds the app.
+        if isFollowing && connectionMode == .macBridge {
+            Task { @MainActor in
+                await emergencyStop()
+                status = "Mac Bridge Follow stopped in background"
+            }
+        }
+    }
+
+    func appDidBecomeActive() {
+        if isFollowing,
+           connectionMode == .directBluetooth,
+           operationMode == .hybridFollow {
+
+            status = "HYBRID FOLLOW ACTIVE • foreground restored"
         }
     }
 
@@ -840,8 +859,13 @@ final class FollowAppModel: ObservableObject {
                 return
             }
 
+            let fusedPathDistance = max(
+                motion.totalDistance,
+                motion.gpsPathDistance
+            )
+
             directFollow.accept(
-                totalDistanceMeters: motion.totalDistance,
+                totalDistanceMeters: fusedPathDistance,
                 gpsCourseDegrees: motion.bestPathCourse,
                 gpsCourseValid: motion.bestPathCourseUsable,
                 moving: motion.moving
@@ -851,7 +875,7 @@ final class FollowAppModel: ObservableObject {
                 format: "HYBRID • %@ • %@ • %.2fm • RSSI %.0f",
                 directFollow.state,
                 directFollow.trackingQuality,
-                motion.totalDistance,
+                max(motion.totalDistance, motion.gpsPathDistance),
                 directBLE.smoothedRSSI
             )
             return
