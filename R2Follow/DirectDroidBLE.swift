@@ -24,6 +24,8 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
     @Published var isConnected = false
     @Published var connectedName = ""
     @Published var lastRX = ""
+    @Published var rssi = -100.0
+    @Published var smoothedRSSI = -100.0
 
     var onDisconnected: (() -> Void)?
 
@@ -34,7 +36,9 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
     private var discoveredPeripherals: [UUID: CBPeripheral] = [:]
     private var discoveredRSSI: [UUID: Int] = [:]
     private var heartbeat: Timer?
+    private var rssiTimer: Timer?
     private var actionGeneration = 0
+    private var ambientGeneration = 0
 
     override init() {
         super.init()
@@ -101,6 +105,8 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         emergencyStop()
         heartbeat?.invalidate()
         heartbeat = nil
+        rssiTimer?.invalidate()
+        rssiTimer = nil
 
         guard let peripheral else {
             cleanup("Disconnected")
@@ -215,6 +221,12 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         heartbeat = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
             self?.sendCommand(id: 14, data: Data())
         }
+
+        rssiTimer?.invalidate()
+        rssiTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            self?.peripheral?.readRSSI()
+        }
+        peripheral.readRSSI()
     }
 
     func peripheral(
@@ -233,6 +245,21 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
     ) {
         if let error {
             status = "Bluetooth write failed: \(error.localizedDescription)"
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        guard error == nil else { return }
+
+        let value = RSSI.doubleValue
+        guard value < 0, value > -120 else { return }
+
+        rssi = value
+
+        if smoothedRSSI <= -99 {
+            smoothedRSSI = value
+        } else {
+            smoothedRSSI = (smoothedRSSI * 0.78) + (value * 0.22)
         }
     }
 
@@ -319,6 +346,7 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
 
     func emergencyStop() {
         actionGeneration += 1
+        ambientGeneration += 1
         guard isConnected else { return }
         stopDrive()
         stopDome()
@@ -348,6 +376,30 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         audioCommand(command, parameter: 1)
         audioCommand(command, parameter: 2)
         audioCommand(command, parameter: 4)
+    }
+
+    func ambientDomeGlance() {
+        guard isConnected else { return }
+
+        ambientGeneration += 1
+        let generation = ambientGeneration
+        let goLeft = Bool.random()
+
+        if goLeft {
+            domeLeft(speed: UInt8(Int.random(in: 45...68)))
+        } else {
+            domeRight(speed: UInt8(Int.random(in: 45...68)))
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.22...0.42)) { [weak self] in
+            guard let self, self.isConnected, self.ambientGeneration == generation else { return }
+            self.stopDome()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.10...0.28)) { [weak self] in
+                guard let self, self.isConnected, self.ambientGeneration == generation else { return }
+                self.centerDome(speed: 130)
+            }
+        }
     }
 
     func naturalFollowBlink() {
@@ -556,7 +608,10 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
     private func cleanup(_ message: String) {
         heartbeat?.invalidate()
         heartbeat = nil
+        rssiTimer?.invalidate()
+        rssiTimer = nil
         actionGeneration += 1
+        ambientGeneration += 1
         isConnected = false
         connectedName = ""
         commandCharacteristic = nil
