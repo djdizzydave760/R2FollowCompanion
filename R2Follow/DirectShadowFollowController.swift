@@ -4,15 +4,15 @@ import Combine
 @MainActor
 final class DirectShadowFollowController: ObservableObject {
     struct Settings {
-        var shadowDelay = 2.0
-        var maxSpeed = 70
-        var turnSpeed = 62
-        var minimumDistanceMeters = 0.18
-        var secondsPerMeter = 2.9
-        var turnDegreesPerSecond = 80.0
-        var turnThresholdDegrees = 15.0
-        var maxDrivePulse = 0.55
-        var maxTurnPulse = 0.45
+        var shadowDelay = 0.75
+        var maxSpeed = 82
+        var turnSpeed = 70
+        var minimumDistanceMeters = 0.08
+        var secondsPerMeter = 2.8
+        var turnDegreesPerSecond = 95.0
+        var turnThresholdDegrees = 10.0
+        var maxDrivePulse = 0.34
+        var maxTurnPulse = 0.28
     }
 
     private struct Segment {
@@ -23,6 +23,7 @@ final class DirectShadowFollowController: ObservableObject {
 
     @Published private(set) var isActive = false
     @Published private(set) var state = "OFF"
+    @Published var personalityEnabled = true
 
     var settings = Settings()
 
@@ -36,6 +37,8 @@ final class DirectShadowFollowController: ObservableObject {
     private var queue: [Segment] = []
     private var processingTimer: Timer?
     private var executing = false
+    private var nextChirpAt = Date.distantFuture
+    private var nextLightAt = Date.distantFuture
 
     init(droid: DirectDroidBLE) {
         self.droid = droid
@@ -59,8 +62,15 @@ final class DirectShadowFollowController: ObservableObject {
         executing = false
         isActive = true
         state = "FOLLOWING / WAITING FOR STEPS"
+        nextChirpAt = Date().addingTimeInterval(3.0)
+        nextLightAt = Date().addingTimeInterval(1.0)
 
-        processingTimer = Timer.scheduledTimer(withTimeInterval: 0.10, repeats: true) { [weak self] _ in
+        if personalityEnabled {
+            droid.setAllHeadLEDs(on: true)
+            droid.chirp(bank: 1)
+        }
+
+        processingTimer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
             self?.tick()
         }
     }
@@ -100,6 +110,10 @@ final class DirectShadowFollowController: ObservableObject {
         isActive = false
         droid.stopDrive()
 
+        if personalityEnabled {
+            droid.setAllHeadLEDs(on: true)
+        }
+
         if updateState {
             state = reason.uppercased()
         }
@@ -117,6 +131,8 @@ final class DirectShadowFollowController: ObservableObject {
             stop(reason: "Bluetooth lost")
             return
         }
+
+        performPersonalityIfNeeded()
 
         guard !executing else { return }
 
@@ -181,6 +197,22 @@ final class DirectShadowFollowController: ObservableObject {
             let consumedMeters = duration / secondsPerMeter
             self.accumulatedDistance = max(0, self.accumulatedDistance - consumedMeters)
             self.executing = false
+        }
+    }
+
+    private func performPersonalityIfNeeded() {
+        guard personalityEnabled, droid.isConnected else { return }
+
+        let now = Date()
+
+        if now >= nextLightAt {
+            droid.followLightPulse()
+            nextLightAt = now.addingTimeInterval(2.4)
+        }
+
+        if now >= nextChirpAt {
+            droid.chirp(bank: 1)
+            nextChirpAt = now.addingTimeInterval(Double.random(in: 5.0...8.0))
         }
     }
 
