@@ -59,6 +59,22 @@ final class FollowAppModel: ObservableObject {
         }
     }
 
+    @Published var externalAudioEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                externalAudioEnabled,
+                forKey: "externalAudioEnabled"
+            )
+
+            if externalAudioEnabled &&
+               operationMode == .backpack {
+                externalAudio.start()
+            } else if !externalAudioEnabled {
+                externalAudio.stop()
+            }
+        }
+    }
+
     @Published var calibratedHeading: Double?
     @Published var isFollowing = false
     @Published var sequence = 0
@@ -68,6 +84,7 @@ final class FollowAppModel: ObservableObject {
     let bridge = MacBridge()
     let voice = VoiceCommandListener()
     let directBLE = DirectDroidBLE()
+    let externalAudio = R2ExternalAudioEngine()
     lazy var directFollow = DirectShadowFollowController(droid: directBLE)
 
     private var sessionID = UUID().uuidString
@@ -93,6 +110,17 @@ final class FollowAppModel: ObservableObject {
         let storedPersonality = UserDefaults.standard.string(forKey: "personalityMode")
         personalityMode = R2PersonalityMode(rawValue: storedPersonality ?? "") ?? .relaxed
 
+        if UserDefaults.standard.object(
+            forKey: "externalAudioEnabled"
+        ) == nil {
+            externalAudioEnabled = true
+        } else {
+            externalAudioEnabled =
+                UserDefaults.standard.bool(
+                    forKey: "externalAudioEnabled"
+                )
+        }
+
         syncBridgeSettings()
 
         motion.objectWillChange
@@ -115,6 +143,10 @@ final class FollowAppModel: ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 
+        externalAudio.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
         voice.onCommand = { [weak self] command in
             guard let self else { return }
             Task { @MainActor in
@@ -129,8 +161,20 @@ final class FollowAppModel: ObservableObject {
             }
         }
 
+        motion.onActivityPulse = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                self.servicePersonalityPulse()
+            }
+        }
+
         beginDroidLifeLoop()
         applyOperationMode()
+
+        if operationMode == .backpack &&
+           externalAudioEnabled {
+            externalAudio.start()
+        }
     }
 
     func syncBridgeSettings() {
@@ -149,19 +193,39 @@ final class FollowAppModel: ObservableObject {
         switch operationMode {
         case .hybridFollow:
             directBLE.setDriveLocked(false)
+
             if !isFollowing {
+                // Stop the Backpack-only background life session until Follow
+                // is explicitly started.
+                motion.stopTracking()
+                externalAudio.stop()
                 status = "Hybrid Follow mode • wheels enabled"
             }
 
         case .backpack:
             sendTimer?.invalidate()
             sendTimer = nil
-            motion.stopTracking()
+
             directFollow.stop(reason: "Backpack mode")
             directBLE.setDriveLocked(true)
             isFollowing = false
             UIApplication.shared.isIdleTimerDisabled = false
-            status = "BACKPACK MODE • wheel motors locked • dome/audio/lights only"
+
+            // Backpack Mode has no wheel movement, but keeps a user-visible
+            // background location activity session so iOS can deliver pulses
+            // after the screen locks.
+            motion.stopTracking()
+            motion.startBackgroundFollowSession()
+
+            directBLE.setAllHeadLEDs(on: true)
+            resetPersonalitySchedule()
+
+            if externalAudioEnabled {
+                externalAudio.start()
+            }
+
+            status =
+                "BACKPACK MODE • wheels locked • locked-screen life active"
         }
     }
 
@@ -190,6 +254,18 @@ final class FollowAppModel: ObservableObject {
         guard !isFollowing else { return }
         directBLE.connect(device)
         status = "Connecting directly to R2…"
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + 2.0
+        ) { [weak self] in
+            guard let self,
+                  self.directBLE.isConnected else {
+                return
+            }
+
+            self.applyOperationMode()
+            self.servicePersonalityPulse(force: true)
+        }
     }
 
     func disconnectDirectDroid() {
@@ -198,6 +274,7 @@ final class FollowAppModel: ObservableObject {
             finishFollowLocally()
         }
         directBLE.disconnect()
+        externalAudio.stop()
         status = "Direct Bluetooth disconnected"
     }
 
@@ -225,100 +302,171 @@ final class FollowAppModel: ObservableObject {
             guard let self else { return }
 
             Task { @MainActor in
-                guard self.connectionMode == .directBluetooth,
-                      self.directBLE.isConnected,
-                      self.directFollow.personalityEnabled else {
-                    return
-                }
-
-                let now = Date()
-
-                let blinkRange: ClosedRange<Double>
-                let headRange: ClosedRange<Double>
-                let chirpRange: ClosedRange<Double>
-                let soundBank: Int?
-                let doubleHeadChance: Int
-
-                switch self.personalityMode {
-                case .relaxed:
-                    blinkRange = 1.2...2.8
-                    headRange = 4.0...7.0
-                    chirpRange = 8.0...14.0
-                    soundBank = 1
-                    doubleHeadChance = 7
-
-                case .excited:
-                    blinkRange = 0.35...1.0
-                    headRange = 1.2...2.7
-                    chirpRange = 2.8...5.0
-                    soundBank = 1
-                    doubleHeadChance = 2
-
-                case .patrol:
-                    blinkRange = 0.7...1.7
-                    headRange = 1.5...3.2
-                    chirpRange = 4.5...7.5
-                    soundBank = 7
-                    doubleHeadChance = 3
-
-                case .curious:
-                    blinkRange = 0.8...2.0
-                    headRange = 2.0...4.0
-                    chirpRange = 5.0...9.0
-                    soundBank = 1
-                    doubleHeadChance = 2
-
-                case .quiet:
-                    blinkRange = 2.0...4.5
-                    headRange = 5.0...9.0
-                    chirpRange = 18.0...28.0
-                    soundBank = nil
-                    doubleHeadChance = 9
-                }
-
-                if now >= self.nextIdleBlink {
-                    self.directBLE.naturalFollowBlink()
-                    self.nextIdleBlink =
-                        now.addingTimeInterval(
-                            self.randomDelay(blinkRange)
-                        )
-                }
-
-                if now >= self.nextIdleHead {
-                    self.directBLE.ambientDomeGlance()
-
-                    if Int.random(in: 0...doubleHeadChance) == 0 {
-                        DispatchQueue.main.asyncAfter(
-                            deadline: .now() + 0.85
-                        ) { [weak self] in
-                            guard let self,
-                                  self.directBLE.isConnected else {
-                                return
-                            }
-                            self.directBLE.ambientDomeGlance()
-                        }
-                    }
-
-                    self.nextIdleHead =
-                        now.addingTimeInterval(
-                            self.randomDelay(headRange)
-                        )
-                }
-
-                if now >= self.nextIdleChirp {
-                    if let soundBank {
-                        self.directBLE.expressiveChirp(
-                            bank: soundBank
-                        )
-                    }
-
-                    self.nextIdleChirp =
-                        now.addingTimeInterval(
-                            self.randomDelay(chirpRange)
-                        )
-                }
+                self.servicePersonalityPulse()
             }
         }
+    }
+
+    private func servicePersonalityPulse(
+        force: Bool = false
+    ) {
+        guard connectionMode == .directBluetooth,
+              directBLE.isConnected,
+              directFollow.personalityEnabled else {
+            return
+        }
+
+        let now = Date()
+
+        let blinkRange: ClosedRange<Double>
+        let headRange: ClosedRange<Double>
+        let chirpRange: ClosedRange<Double>
+        let soundBank: Int?
+        let doubleHeadChance: Int
+        let soundIntensity: Double
+
+        switch personalityMode {
+        case .relaxed:
+            blinkRange =
+                operationMode == .backpack
+                ? 0.8...1.8
+                : 1.2...2.8
+
+            headRange =
+                operationMode == .backpack
+                ? 2.0...4.0
+                : 4.0...7.0
+
+            chirpRange =
+                operationMode == .backpack
+                ? 5.0...9.0
+                : 8.0...14.0
+
+            soundBank = 1
+            doubleHeadChance = 6
+            soundIntensity = 0.45
+
+        case .excited:
+            blinkRange = 0.25...0.75
+            headRange = 0.9...2.0
+            chirpRange = 2.0...3.8
+            soundBank = 1
+            doubleHeadChance = 2
+            soundIntensity = 0.95
+
+        case .patrol:
+            blinkRange = 0.45...1.15
+            headRange = 1.1...2.4
+            chirpRange = 3.0...5.5
+            soundBank = 7
+            doubleHeadChance = 3
+            soundIntensity = 0.68
+
+        case .curious:
+            blinkRange = 0.55...1.4
+            headRange = 1.2...2.8
+            chirpRange = 3.5...6.5
+            soundBank = 1
+            doubleHeadChance = 2
+            soundIntensity = 0.60
+
+        case .quiet:
+            blinkRange = 1.4...3.2
+            headRange = 3.2...6.0
+            chirpRange = 10.0...18.0
+            soundBank = nil
+            doubleHeadChance = 8
+            soundIntensity = 0.25
+        }
+
+        if force || now >= nextIdleBlink {
+            directBLE.naturalFollowBlink()
+            nextIdleBlink =
+                now.addingTimeInterval(
+                    randomDelay(blinkRange)
+                )
+        }
+
+        if force || now >= nextIdleHead {
+            // Dome-only movement is always safe in Backpack Mode because the
+            // wheel lock is enforced down in DirectDroidBLE.
+            directBLE.ambientDomeGlance()
+            directBLE.naturalFollowBlink()
+
+            if Int.random(in: 0...doubleHeadChance) == 0 {
+                DispatchQueue.main.asyncAfter(
+                    deadline: .now() + 0.75
+                ) { [weak self] in
+                    guard let self,
+                          self.directBLE.isConnected else {
+                        return
+                    }
+
+                    self.directBLE.ambientDomeGlance()
+                    self.directBLE.naturalFollowBlink()
+                }
+            }
+
+            nextIdleHead =
+                now.addingTimeInterval(
+                    randomDelay(headRange)
+                )
+        }
+
+        if force || now >= nextIdleChirp {
+            if let soundBank {
+                if externalAudioEnabled &&
+                   externalAudio.isRunning {
+                    // JBL/iPhone sound comes from the phone. R2's dome and LEDs
+                    // animate in sync without doubling the internal speaker.
+                    externalAudio.playDroidChirp(
+                        intensity: soundIntensity
+                    )
+                    directBLE.expressiveHeadAndLights()
+                } else {
+                    directBLE.expressiveChirp(
+                        bank: soundBank
+                    )
+                }
+            }
+
+            nextIdleChirp =
+                now.addingTimeInterval(
+                    randomDelay(chirpRange)
+                )
+        }
+    }
+
+    // MARK: - External / JBL audio
+
+    func setExternalAudioEnabled(_ enabled: Bool) {
+        externalAudioEnabled = enabled
+
+        if enabled {
+            externalAudio.start()
+            servicePersonalityPulse(force: true)
+            status =
+                "EXTERNAL R2 AUDIO ON • \(externalAudio.routeDescription)"
+        } else {
+            externalAudio.stop()
+            status = "External R2 audio off • using R2 internal sounds"
+        }
+    }
+
+    func testExternalSpeaker() {
+        guard directBLE.isConnected else {
+            status = "Connect R2 before testing external speaker sync"
+            return
+        }
+
+        if !externalAudio.isRunning {
+            externalAudio.start()
+        }
+
+        externalAudio.playDroidChirp(intensity: 0.75)
+        directBLE.expressiveHeadAndLights()
+        status =
+            "SPEAKER TEST • \(externalAudio.routeDescription)"
     }
 
     // MARK: - R2 pre-follow calibration
@@ -800,34 +948,58 @@ final class FollowAppModel: ObservableObject {
     }
 
     func appDidEnterBackground() {
-        // Direct Hybrid Follow is intentionally allowed to continue after the
-        // screen dims/locks. Core Location background mode keeps the active
-        // user-started tracking session alive and Core Bluetooth is declared
-        // for central-role background communication.
+        if connectionMode == .directBluetooth,
+           operationMode == .backpack,
+           directBLE.isConnected {
+
+            motion.startBackgroundFollowSession()
+
+            if externalAudioEnabled {
+                externalAudio.start()
+            }
+
+            status =
+                "BACKPACK BACKGROUND ACTIVE • wheels locked • screen may sleep"
+            return
+        }
+
         if isFollowing,
            connectionMode == .directBluetooth,
            operationMode == .hybridFollow {
 
-            status = "BACKGROUND FOLLOW ACTIVE • screen locked is OK"
+            status =
+                "BACKGROUND FOLLOW ACTIVE • screen locked is OK"
             return
         }
 
-        // Mac Bridge depends on foreground networking/timers and is not safe to
-        // continue blindly when iOS backgrounds the app.
         if isFollowing && connectionMode == .macBridge {
             Task { @MainActor in
                 await emergencyStop()
-                status = "Mac Bridge Follow stopped in background"
+                status =
+                    "Mac Bridge Follow stopped in background"
             }
         }
     }
 
     func appDidBecomeActive() {
+        externalAudio.refreshRoute()
+
+        if connectionMode == .directBluetooth,
+           operationMode == .backpack,
+           directBLE.isConnected {
+
+            status =
+                "BACKPACK MODE ACTIVE • wheel motors locked"
+            servicePersonalityPulse()
+            return
+        }
+
         if isFollowing,
            connectionMode == .directBluetooth,
            operationMode == .hybridFollow {
 
-            status = "HYBRID FOLLOW ACTIVE • foreground restored"
+            status =
+                "HYBRID FOLLOW ACTIVE • foreground restored"
         }
     }
 
