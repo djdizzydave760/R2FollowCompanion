@@ -242,6 +242,46 @@ struct ContentView: View {
                     model.externalAudio.routeDescription
                 )
 
+                metric(
+                    "Bluetooth A2DP",
+                    model.externalAudio.isBluetoothA2DP
+                        ? "YES"
+                        : "NO"
+                )
+
+                metric(
+                    "iPhone output volume",
+                    String(
+                        format: "%.0f%%",
+                        model.externalAudio.outputVolume * 100
+                    )
+                )
+
+                Text(model.externalAudio.status)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(
+                        model.externalAudio.isBluetoothA2DP
+                            ? .green
+                            : .orange
+                    )
+
+                Button {
+                    model.refreshExternalAudioRoute()
+                } label: {
+                    Label(
+                        "Refresh / Check Audio Route",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                if !model.externalAudio.isBluetoothA2DP {
+                    Text("JBL is not the active media output. Open iPhone Control Center → tap the audio output/AirPlay button → select JBL Clip 5, then return here and tap Refresh / Check Audio Route.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
                 Text(
                     model.externalAudioEnabled
                         ? "This plays original droid-style sounds from the iPhone. If a JBL speaker is paired and selected as the iPhone audio output, the sounds route to the JBL and the background audio session helps Backpack Mode stay active while the screen is black."
@@ -254,13 +294,13 @@ struct ContentView: View {
                     model.testExternalSpeaker()
                 } label: {
                     Label(
-                        "Test JBL / Phone Sound + Head + LEDs",
+                        "LOUD JBL TEST + Head + LEDs",
                         systemImage: "speaker.wave.3.fill"
                     )
                     .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                .disabled(!model.directBLE.isConnected)
+                .buttonStyle(.borderedProminent)
+                .tint(.purple)
             } else {
                 Label(
                     "HYBRID FOLLOW • GPS path + motion + Bluetooth spacing",
