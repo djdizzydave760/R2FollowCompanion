@@ -43,7 +43,14 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
 
     override init() {
         super.init()
-        central = CBCentralManager(delegate: self, queue: .main)
+        central = CBCentralManager(
+            delegate: self,
+            queue: .main,
+            options: [
+                CBCentralManagerOptionRestoreIdentifierKey:
+                    "local.droidcontrol.r2follow.central"
+            ]
+        )
     }
 
     func scan() {
@@ -125,6 +132,33 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
             status = bluetoothStateText()
         } else if !isConnected {
             status = "Bluetooth ready"
+        }
+    }
+
+    func centralManager(
+        _ central: CBCentralManager,
+        willRestoreState dict: [String : Any]
+    ) {
+        guard
+            let peripherals =
+                dict[CBCentralManagerRestoredStatePeripheralsKey]
+                as? [CBPeripheral],
+            let restored = peripherals.first
+        else {
+            return
+        }
+
+        peripheral = restored
+        restored.delegate = self
+        discoveredPeripherals[restored.identifier] = restored
+        connectedName =
+            "DROID • \(restored.identifier.uuidString.suffix(6))"
+        status = "Restoring R2 Bluetooth connection…"
+
+        if restored.state == .connected {
+            restored.discoverServices([Self.serviceUUID])
+        } else {
+            central.connect(restored, options: nil)
         }
     }
 
@@ -395,39 +429,58 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         }
     }
 
-    func expressiveChirp(bank: Int = 1) {
+    func expressiveHeadAndLights() {
         guard isConnected else { return }
 
         ambientGeneration += 1
         let generation = ambientGeneration
         let lookLeftFirst = Bool.random()
 
-        // Start the sound and dome movement together so R2 visibly "talks"
-        // with his head instead of chirping while motionless.
-        chirp(bank: bank)
+        // Make the LEDs visibly respond at the same time as the dome.
         naturalFollowBlink()
 
         if lookLeftFirst {
-            domeLeft(speed: 105)
+            domeLeft(speed: UInt8(Int.random(in: 92...118)))
         } else {
-            domeRight(speed: 105)
+            domeRight(speed: UInt8(Int.random(in: 92...118)))
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) { [weak self] in
-            guard let self, self.isConnected, self.ambientGeneration == generation else { return }
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Double.random(in: 0.26...0.40)
+        ) { [weak self] in
+            guard let self,
+                  self.isConnected,
+                  self.ambientGeneration == generation else {
+                return
+            }
+
+            self.naturalFollowBlink()
 
             if lookLeftFirst {
-                self.domeRight(speed: 88)
+                self.domeRight(speed: UInt8(Int.random(in: 78...98)))
             } else {
-                self.domeLeft(speed: 88)
+                self.domeLeft(speed: UInt8(Int.random(in: 78...98)))
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.64) { [weak self] in
-            guard let self, self.isConnected, self.ambientGeneration == generation else { return }
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Double.random(in: 0.58...0.78)
+        ) { [weak self] in
+            guard let self,
+                  self.isConnected,
+                  self.ambientGeneration == generation else {
+                return
+            }
+
             self.stopDome()
             self.centerDome(speed: 175)
         }
+    }
+
+    func expressiveChirp(bank: Int = 1) {
+        guard isConnected else { return }
+        chirp(bank: bank)
+        expressiveHeadAndLights()
     }
 
     func testHeadAndVoice() {
