@@ -16,6 +16,7 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
     private let motion = CMMotionManager()
     private var motionTimer: Timer?
     private var lastAcceleration = 0.0
+    private var lastMotionActivityAt = Date.distantPast
 
     override init() {
         super.init()
@@ -40,6 +41,7 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
     func startTracking() {
         totalDistance = 0
         moving = false
+        lastMotionActivityAt = Date.distantPast
 
         if CLLocationManager.headingAvailable() {
             location.startUpdatingHeading()
@@ -64,7 +66,13 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
                 let a = sample.userAcceleration
                 let magnitude = sqrt(a.x * a.x + a.y * a.y + a.z * a.z)
                 self.lastAcceleration = magnitude
-                if magnitude > 0.035 { self.moving = true }
+
+                if magnitude > 0.035 {
+                    self.lastMotionActivityAt = Date()
+                    self.moving = true
+                } else if Date().timeIntervalSince(self.lastMotionActivityAt) > 0.75 {
+                    self.moving = false
+                }
             }
         }
     }
