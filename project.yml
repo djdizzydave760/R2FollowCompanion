@@ -15,6 +15,11 @@ targets:
       - R2Follow
     info:
       path: R2Follow/Info.plist
+      properties:
+        UIBackgroundModes:
+          - location
+          - bluetooth-central
+          - audio
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: local.droidcontrol.r2followbeta
