@@ -13,6 +13,7 @@ struct ContentView: View {
 
                     if model.connectionMode == .directBluetooth {
                         directBluetoothCard
+                        r2CalibrationCard
                     } else {
                         connectionCard
                     }
@@ -161,6 +162,112 @@ struct ContentView: View {
         }
     }
 
+    private var r2CalibrationCard: some View {
+        card("R2 FOLLOW CALIBRATION", icon: "slider.horizontal.3") {
+            Text("Use these controls before Follow. Put R2 about 3 ft behind you, facing exactly the same direction you are facing. Test forward first; R2 should move straight, not rotate.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button {
+                model.markR2AlignedWithPhone()
+            } label: {
+                Label("1. Mark R2 + iPhone Facing Same Direction", systemImage: "scope")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.cyan)
+            .disabled(!model.directBLE.isConnected || model.isFollowing)
+
+            HStack {
+                Button("← Test Left") {
+                    model.testR2TurnLeft()
+                }
+                .buttonStyle(.bordered)
+
+                Button("Test Forward ↑") {
+                    model.testR2Forward()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+
+                Button("Test Right →") {
+                    model.testR2TurnRight()
+                }
+                .buttonStyle(.bordered)
+            }
+            .disabled(!model.directBLE.isConnected || model.isFollowing)
+
+            Button(role: .destructive) {
+                model.stopR2CalibrationMotion()
+            } label: {
+                Label("Calibration Stop", systemImage: "stop.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!model.directBLE.isConnected)
+
+            Divider()
+
+            calibrationSlider(
+                "Follow delay",
+                value: $model.directFollow.shadowDelay,
+                range: 0.20...1.20,
+                step: 0.05,
+                valueText: String(format: "%.2f sec", model.directFollow.shadowDelay)
+            )
+
+            calibrationSlider(
+                "Forward speed",
+                value: $model.directFollow.driveSpeed,
+                range: 55...100,
+                step: 1,
+                valueText: String(format: "%.0f", model.directFollow.driveSpeed)
+            )
+
+            calibrationSlider(
+                "Forward distance",
+                value: $model.directFollow.secondsPerMeter,
+                range: 1.8...4.5,
+                step: 0.05,
+                valueText: String(format: "%.2f", model.directFollow.secondsPerMeter)
+            )
+
+            calibrationSlider(
+                "Turn speed",
+                value: $model.directFollow.turnSpeed,
+                range: 45...85,
+                step: 1,
+                valueText: String(format: "%.0f", model.directFollow.turnSpeed)
+            )
+
+            calibrationSlider(
+                "Turn dead zone",
+                value: $model.directFollow.turnDeadbandDegrees,
+                range: 10...35,
+                step: 1,
+                valueText: String(format: "%.0f°", model.directFollow.turnDeadbandDegrees)
+            )
+
+            calibrationSlider(
+                "Compass smoothing",
+                value: $model.directFollow.headingSmoothing,
+                range: 0.08...0.50,
+                step: 0.01,
+                valueText: String(format: "%.2f", model.directFollow.headingSmoothing)
+            )
+
+            Text("If R2 barely moves, raise Forward distance first. If he circles or keeps correcting, raise Turn dead zone or lower Turn speed. Keep Compass smoothing near the middle unless the heading is very jumpy.")
+                .font(.caption)
+                .foregroundStyle(.orange)
+
+            Button("Restore Recommended Calibration") {
+                model.resetFollowCalibration()
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.isFollowing)
+        }
+    }
+
     private var connectionCard: some View {
         card("MAC CONNECTION", icon: "desktopcomputer") {
             TextField("Mac IP (example 192.168.1.25)", text: $model.macHost)
@@ -192,7 +299,7 @@ struct ContentView: View {
 
     private var setupCard: some View {
         card("CALIBRATE", icon: "safari") {
-            Text("First enable iPhone sensors. Then put R2 4–6 ft behind you, with R2 facing the same direction you are facing.")
+            Text("First enable iPhone sensors. For Direct Bluetooth Follow, put R2 about 3 ft behind you with his body facing exactly the same direction you are facing.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -278,7 +385,7 @@ struct ContentView: View {
         card("FOLLOW CONTROL", icon: "figure.walk.motion") {
             if model.connectionMode == .directBluetooth {
                 Label(
-                    "Close Follow • ~0.75 sec trail • faster catch-up",
+                    "Close Follow • ~0.35 sec trail • stabilized heading",
                     systemImage: "bolt.horizontal.circle.fill"
                 )
                 .font(.caption)
@@ -351,6 +458,28 @@ struct ContentView: View {
             Text("Direct Bluetooth removes the Wi-Fi and Mac dependency, but it does not turn R2 into a true position-tracking robot. Follow still estimates your route from the iPhone. R2 cannot see stairs, pets, people, furniture, walls, curbs, or traffic. Test on a clear, flat, single-level area and stay close enough to stop R2 immediately.")
                 .font(.caption)
                 .foregroundStyle(.orange)
+        }
+    }
+
+    private func calibrationSlider(
+        _ title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double,
+        valueText: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(title)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(valueText)
+                    .font(.caption.monospaced().bold())
+                    .foregroundStyle(.cyan)
+            }
+
+            Slider(value: value, in: range, step: step)
+                .disabled(model.isFollowing)
         }
     }
 
