@@ -133,7 +133,7 @@ final class DirectShadowFollowController: ObservableObject {
 
         if personalityEnabled {
             droid.setAllHeadLEDs(on: true)
-            droid.chirp(bank: 1)
+            droid.expressiveChirp(bank: 1)
         }
 
         processingTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
