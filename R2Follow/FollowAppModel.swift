@@ -414,19 +414,23 @@ final class FollowAppModel: ObservableObject {
         }
 
         if force || now >= nextIdleChirp {
-            if let soundBank {
+            if soundBank != nil {
                 if externalAudioEnabled &&
-                   externalAudio.isRunning {
-                    // JBL/iPhone sound comes from the phone. R2's dome and LEDs
-                    // animate in sync without doubling the internal speaker.
-                    externalAudio.playDroidChirp(
-                        intensity: soundIntensity
-                    )
-                    directBLE.expressiveHeadAndLights()
+                   externalAudio.isRunning &&
+                   externalAudio.hasImportedSoundPack {
+
+                    let played =
+                        externalAudio.playNextPackSound()
+
+                    if played {
+                        directBLE.expressiveHeadAndLights()
+                    } else {
+                        directBLE.expressiveRandomBuiltInSound()
+                    }
                 } else {
-                    directBLE.expressiveChirp(
-                        bank: soundBank
-                    )
+                    // Use R2's real built-in sound library. The BLE layer
+                    // shuffles every known track before repeating any sound.
+                    directBLE.expressiveRandomBuiltInSound()
                 }
             }
 
@@ -446,10 +450,47 @@ final class FollowAppModel: ObservableObject {
             externalAudio.start()
             servicePersonalityPulse(force: true)
             status =
-                "EXTERNAL R2 AUDIO ON • \(externalAudio.routeDescription)"
+                externalAudio.hasImportedSoundPack
+                ? "JBL SOUND PACK ON • \(externalAudio.importedSoundCount) files"
+                : "JBL ROUTE ON • no pack loaded • using R2 built-in sounds"
         } else {
             externalAudio.stop()
             status = "External R2 audio off • using R2 internal sounds"
+        }
+    }
+
+    func importExternalSoundFiles(_ urls: [URL]) {
+        externalAudio.importSoundFiles(urls)
+        externalAudio.start()
+
+        if externalAudio.hasImportedSoundPack {
+            status =
+                "JBL SOUND PACK READY • \(externalAudio.importedSoundCount) files"
+        } else {
+            status =
+                "No sound pack loaded • using R2 built-in sounds"
+        }
+    }
+
+    func clearExternalSoundPack() {
+        externalAudio.clearSoundPack()
+        status =
+            "JBL sound pack cleared • using R2 built-in sound shuffle"
+    }
+
+    func testExternalSoundPack() {
+        externalAudio.start()
+
+        if externalAudio.playNextPackSound() {
+            if directBLE.isConnected {
+                directBLE.expressiveHeadAndLights()
+            }
+
+            status =
+                "PACK TEST • \(externalAudio.lastPackSound)"
+        } else {
+            status =
+                "No imported JBL sound pack yet"
         }
     }
 
