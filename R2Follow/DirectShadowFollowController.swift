@@ -3,18 +3,6 @@ import Combine
 
 @MainActor
 final class DirectShadowFollowController: ObservableObject {
-    struct Settings {
-        var shadowDelay = 0.75
-        var maxSpeed = 82
-        var turnSpeed = 70
-        var minimumDistanceMeters = 0.08
-        var secondsPerMeter = 2.8
-        var turnDegreesPerSecond = 95.0
-        var turnThresholdDegrees = 10.0
-        var maxDrivePulse = 0.34
-        var maxTurnPulse = 0.28
-    }
-
     private struct Segment {
         let readyAt: Date
         let distanceDeltaMeters: Double
@@ -23,9 +11,23 @@ final class DirectShadowFollowController: ObservableObject {
 
     @Published private(set) var isActive = false
     @Published private(set) var state = "OFF"
+    @Published private(set) var filteredHeading = 0.0
+    @Published private(set) var headingError = 0.0
+    @Published private(set) var queuedDistance = 0.0
     @Published var personalityEnabled = true
 
-    var settings = Settings()
+    // Live calibration controls. These can be adjusted from the iPhone before Follow.
+    @Published var shadowDelay = 0.45
+    @Published var driveSpeed = 88.0
+    @Published var turnSpeed = 66.0
+    @Published var minimumDistanceMeters = 0.05
+    @Published var secondsPerMeter = 2.45
+    @Published var turnDegreesPerSecond = 92.0
+    @Published var turnDeadbandDegrees = 18.0
+    @Published var maxHeadingAccuracy = 35.0
+    @Published var headingSmoothing = 0.22
+    @Published var maxDrivePulse = 0.26
+    @Published var maxTurnPulse = 0.22
 
     private let droid: DirectDroidBLE
     private var referenceHeading = 0.0
@@ -37,11 +39,37 @@ final class DirectShadowFollowController: ObservableObject {
     private var queue: [Segment] = []
     private var processingTimer: Timer?
     private var executing = false
+    private var hasFilteredHeading = false
     private var nextChirpAt = Date.distantFuture
     private var nextLightAt = Date.distantFuture
 
     init(droid: DirectDroidBLE) {
         self.droid = droid
+    }
+
+    func resetRecommendedCalibration() {
+        shadowDelay = 0.45
+        driveSpeed = 88
+        turnSpeed = 66
+        minimumDistanceMeters = 0.05
+        secondsPerMeter = 2.45
+        turnDegreesPerSecond = 92
+        turnDeadbandDegrees = 18
+        maxHeadingAccuracy = 35
+        headingSmoothing = 0.22
+        maxDrivePulse = 0.26
+        maxTurnPulse = 0.22
+    }
+
+    func setReferenceHeading(_ heading: Double) {
+        referenceHeading = normalized360(heading)
+        estimatedDroidHeading = 0
+        latestTargetHeading = 0
+        lastQueuedHeading = 0
+        filteredHeading = 0
+        headingError = 0
+        hasFilteredHeading = false
+        state = "R2 FORWARD HEADING ALIGNED"
     }
 
     func start(initialHeading: Double) {
@@ -52,51 +80,95 @@ final class DirectShadowFollowController: ObservableObject {
             return
         }
 
-        referenceHeading = normalized360(initialHeading)
-        estimatedDroidHeading = 0
-        latestTargetHeading = 0
-        lastQueuedHeading = 0
+        setReferenceHeading(initialHeading)
         lastTotalDistance = 0
         accumulatedDistance = 0
+        queuedDistance = 0
         queue.removeAll()
         executing = false
         isActive = true
         state = "FOLLOWING / WAITING FOR STEPS"
-        nextChirpAt = Date().addingTimeInterval(3.0)
-        nextLightAt = Date().addingTimeInterval(1.0)
+        nextChirpAt = Date().addingTimeInterval(2.5)
+        nextLightAt = Date().addingTimeInterval(0.6)
 
         if personalityEnabled {
             droid.setAllHeadLEDs(on: true)
             droid.chirp(bank: 1)
         }
 
-        processingTimer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
+        processingTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             self?.tick()
         }
     }
 
-    func accept(totalDistanceMeters: Double, headingDegrees: Double) {
+    func accept(
+        totalDistanceMeters: Double,
+        headingDegrees: Double,
+        headingAccuracy: Double,
+        moving: Bool
+    ) {
         guard isActive, droid.isConnected else { return }
 
         let total = max(0, totalDistanceMeters)
-        let delta = max(0, min(1.5, total - lastTotalDistance))
+        let delta = max(0, min(1.0, total - lastTotalDistance))
         lastTotalDistance = total
 
-        let relativeHeading = shortestAngle(normalized360(headingDegrees) - referenceHeading)
-        let headingChanged = abs(shortestAngle(relativeHeading - lastQueuedHeading)) >= settings.turnThresholdDegrees
+        let headingUsable =
+            headingAccuracy >= 0 &&
+            headingAccuracy <= maxHeadingAccuracy &&
+            headingDegrees.isFinite
 
-        if delta >= 0.015 || headingChanged {
+        var targetHeading = latestTargetHeading
+
+        if headingUsable {
+            let rawRelative = shortestAngle(normalized360(headingDegrees) - referenceHeading)
+
+            if !hasFilteredHeading {
+                filteredHeading = rawRelative
+                hasFilteredHeading = true
+            } else {
+                filteredHeading = circularBlend(
+                    from: filteredHeading,
+                    to: rawRelative,
+                    alpha: headingSmoothing
+                )
+            }
+
+            // Ignore impossible single-sample compass jumps. A real walking turn
+            // will continue arriving and the filtered value will catch up smoothly.
+            let jump = shortestAngle(filteredHeading - lastQueuedHeading)
+            let limitedJump = max(-35.0, min(35.0, jump))
+            targetHeading = shortestAngle(lastQueuedHeading + limitedJump)
+        }
+
+        let headingChange = abs(shortestAngle(targetHeading - lastQueuedHeading))
+
+        // Always record real forward progress quickly.
+        let hasForwardProgress = delta >= 0.01
+
+        // A heading-only segment is accepted only while the phone says the user
+        // is actually moving. This prevents pocket compass wobble from making R2
+        // spin in circles while standing still.
+        let hasMeaningfulTurn =
+            moving &&
+            headingUsable &&
+            headingChange >= turnDeadbandDegrees
+
+        if hasForwardProgress || hasMeaningfulTurn {
             queue.append(
                 Segment(
-                    readyAt: Date().addingTimeInterval(max(0, settings.shadowDelay)),
+                    readyAt: Date().addingTimeInterval(max(0.10, shadowDelay)),
                     distanceDeltaMeters: delta,
-                    targetHeading: relativeHeading
+                    targetHeading: targetHeading
                 )
             )
-            lastQueuedHeading = relativeHeading
 
-            if queue.count > 80 {
-                queue.removeFirst(queue.count - 80)
+            if hasMeaningfulTurn || hasForwardProgress {
+                lastQueuedHeading = targetHeading
+            }
+
+            if queue.count > 70 {
+                queue.removeFirst(queue.count - 70)
             }
         }
     }
@@ -106,13 +178,10 @@ final class DirectShadowFollowController: ObservableObject {
         processingTimer = nil
         queue.removeAll()
         accumulatedDistance = 0
+        queuedDistance = 0
         executing = false
         isActive = false
         droid.stopDrive()
-
-        if personalityEnabled {
-            droid.setAllHeadLEDs(on: true)
-        }
 
         if updateState {
             state = reason.uppercased()
@@ -142,25 +211,31 @@ final class DirectShadowFollowController: ObservableObject {
             latestTargetHeading = first.targetHeading
         }
 
+        queuedDistance = accumulatedDistance
+
         let difference = shortestAngle(latestTargetHeading - estimatedDroidHeading)
-        if abs(difference) >= settings.turnThresholdDegrees {
+        headingError = difference
+
+        // Drive first when heading is already reasonably close. Only pivot when
+        // the error is outside the deadband. This dramatically reduces circling.
+        if abs(difference) >= turnDeadbandDegrees {
             performTurn(difference)
             return
         }
 
-        if accumulatedDistance >= settings.minimumDistanceMeters {
+        if accumulatedDistance >= minimumDistanceMeters {
             performForwardPulse()
             return
         }
 
-        state = queue.isEmpty ? "FOLLOWING / WAITING" : "FOLLOWING / DELAY BUFFER"
+        state = queue.isEmpty ? "FOLLOWING / WAITING" : "FOLLOWING / TRAIL BUFFER"
     }
 
     private func performTurn(_ difference: Double) {
-        let degreesPerSecond = max(20, settings.turnDegreesPerSecond)
+        let degreesPerSecond = max(30, turnDegreesPerSecond)
         let requestedDuration = abs(difference) / degreesPerSecond
-        let duration = min(max(0.08, requestedDuration), max(0.10, settings.maxTurnPulse))
-        let speed = UInt8(clamping: max(40, min(settings.maxSpeed, settings.turnSpeed)))
+        let duration = min(max(0.06, requestedDuration), max(0.08, maxTurnPulse))
+        let speed = UInt8(clamping: Int(max(42, min(90, turnSpeed))))
 
         executing = true
 
@@ -174,18 +249,27 @@ final class DirectShadowFollowController: ObservableObject {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             guard let self, self.isActive else { return }
+
             self.droid.stopDrive()
-            let signedDegrees = (difference < 0 ? -1.0 : 1.0) * duration * degreesPerSecond
-            self.estimatedDroidHeading = self.shortestAngle(self.estimatedDroidHeading + signedDegrees)
+
+            let signedDegrees =
+                (difference < 0 ? -1.0 : 1.0) *
+                duration *
+                degreesPerSecond
+
+            self.estimatedDroidHeading = self.shortestAngle(
+                self.estimatedDroidHeading + signedDegrees
+            )
+
             self.executing = false
         }
     }
 
     private func performForwardPulse() {
-        let secondsPerMeter = max(0.5, settings.secondsPerMeter)
-        let requestedDuration = accumulatedDistance * secondsPerMeter
-        let duration = min(max(0.08, requestedDuration), max(0.10, settings.maxDrivePulse))
-        let speed = UInt8(clamping: max(40, min(100, settings.maxSpeed)))
+        let seconds = max(0.8, secondsPerMeter)
+        let requestedDuration = accumulatedDistance * seconds
+        let duration = min(max(0.07, requestedDuration), max(0.09, maxDrivePulse))
+        let speed = UInt8(clamping: Int(max(45, min(100, driveSpeed))))
 
         executing = true
         droid.forward(speed: speed)
@@ -193,9 +277,15 @@ final class DirectShadowFollowController: ObservableObject {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             guard let self, self.isActive else { return }
+
             self.droid.stopDrive()
-            let consumedMeters = duration / secondsPerMeter
-            self.accumulatedDistance = max(0, self.accumulatedDistance - consumedMeters)
+
+            let consumedMeters = duration / seconds
+            self.accumulatedDistance = max(
+                0,
+                self.accumulatedDistance - consumedMeters
+            )
+            self.queuedDistance = self.accumulatedDistance
             self.executing = false
         }
     }
@@ -206,14 +296,20 @@ final class DirectShadowFollowController: ObservableObject {
         let now = Date()
 
         if now >= nextLightAt {
-            droid.followLightPulse()
-            nextLightAt = now.addingTimeInterval(2.4)
+            droid.naturalFollowBlink()
+            nextLightAt = now.addingTimeInterval(Double.random(in: 0.55...1.65))
         }
 
         if now >= nextChirpAt {
             droid.chirp(bank: 1)
-            nextChirpAt = now.addingTimeInterval(Double.random(in: 5.0...8.0))
+            nextChirpAt = now.addingTimeInterval(Double.random(in: 4.0...7.5))
         }
+    }
+
+    private func circularBlend(from: Double, to: Double, alpha: Double) -> Double {
+        let clamped = max(0.05, min(0.80, alpha))
+        let difference = shortestAngle(to - from)
+        return shortestAngle(from + difference * clamped)
     }
 
     private func normalized360(_ value: Double) -> Double {
