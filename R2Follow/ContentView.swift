@@ -428,6 +428,13 @@ struct ContentView: View {
                         ? String(format: "%.0f°", model.motion.course)
                         : "—"
                 )
+                metric(
+                    "Breadcrumb bearing",
+                    model.motion.pathBearing >= 0
+                        ? String(format: "%.0f°", model.motion.pathBearing)
+                        : "—"
+                )
+                metric("Breadcrumbs", "\(model.motion.breadcrumbCount)")
 
                 Text("Best results are outdoors with a clear view of the sky. Start R2 behind you facing the same general direction, then walk several feet so the phone can establish a GPS course.")
                     .font(.caption)
