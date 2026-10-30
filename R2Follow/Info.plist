@@ -35,6 +35,7 @@
   <array>
     <string>location</string>
     <string>bluetooth-central</string>
+    <string>audio</string>
   </array>
   <key>NSLocalNetworkUsageDescription</key>
   <string>R2 Follow sends motion telemetry to Droid Control running on your Mac over your private local network.</string>
