@@ -20,6 +20,10 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
     @Published var speed = -1.0
     @Published var gpsStatus = "GPS not started"
     @Published var locationAge = Double.infinity
+    @Published var pathBearing = -1.0
+    @Published var breadcrumbCount = 0
+    @Published var gpsPathDistance = 0.0
+    @Published var breadcrumbAge = Double.infinity
 
     private let pedometer = CMPedometer()
     private let location = CLLocationManager()
@@ -27,6 +31,8 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
     private var lastAcceleration = 0.0
     private var lastMotionActivityAt = Date.distantPast
     private var latestLocationTimestamp = Date.distantPast
+    private var lastBreadcrumb: CLLocation?
+    private var latestBreadcrumbTimestamp = Date.distantPast
 
     override init() {
         super.init()
@@ -47,6 +53,23 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
         horizontalAccuracy <= 15 &&
         (courseAccuracy < 0 || courseAccuracy <= 35) &&
         locationAge <= 2.0
+    }
+
+
+    var breadcrumbCourseUsable: Bool {
+        pathBearing >= 0 &&
+        pathBearing < 360 &&
+        horizontalAccuracy >= 0 &&
+        horizontalAccuracy <= 15 &&
+        breadcrumbAge <= 3.0
+    }
+
+    var bestPathCourse: Double {
+        breadcrumbCourseUsable ? pathBearing : course
+    }
+
+    var bestPathCourseUsable: Bool {
+        breadcrumbCourseUsable || gpsCourseUsable
     }
 
     func requestPermissions() {
@@ -73,6 +96,12 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
         totalDistance = 0
         moving = false
         lastMotionActivityAt = Date.distantPast
+        lastBreadcrumb = nil
+        latestBreadcrumbTimestamp = .distantPast
+        pathBearing = -1
+        breadcrumbCount = 0
+        gpsPathDistance = 0
+        breadcrumbAge = .infinity
 
         if CLLocationManager.headingAvailable() {
             location.startUpdatingHeading()
@@ -124,6 +153,11 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
                     self.locationAge =
                         Date().timeIntervalSince(self.latestLocationTimestamp)
                 }
+
+                if self.latestBreadcrumbTimestamp != .distantPast {
+                    self.breadcrumbAge =
+                        Date().timeIntervalSince(self.latestBreadcrumbTimestamp)
+                }
             }
         }
     }
@@ -156,6 +190,49 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
 
         latestLocationTimestamp = sample.timestamp
         locationAge = max(0, Date().timeIntervalSince(sample.timestamp))
+
+        if sample.horizontalAccuracy <= 15 {
+            if let previous = lastBreadcrumb {
+                let displacement = sample.distance(from: previous)
+                let accuracyFloor = max(
+                    0.85,
+                    min(
+                        2.25,
+                        max(
+                            sample.horizontalAccuracy,
+                            previous.horizontalAccuracy
+                        ) * 0.24
+                    )
+                )
+
+                if displacement >= accuracyFloor {
+                    let bearing = bearingDegrees(
+                        from: previous.coordinate,
+                        to: sample.coordinate
+                    )
+
+                    if pathBearing < 0 {
+                        pathBearing = bearing
+                    } else {
+                        pathBearing = circularBlend(
+                            from: pathBearing,
+                            to: bearing,
+                            alpha: 0.28
+                        )
+                    }
+
+                    gpsPathDistance += displacement
+                    breadcrumbCount += 1
+                    lastBreadcrumb = sample
+                    latestBreadcrumbTimestamp = sample.timestamp
+                    breadcrumbAge = 0
+                }
+            } else {
+                lastBreadcrumb = sample
+                latestBreadcrumbTimestamp = sample.timestamp
+                breadcrumbAge = 0
+            }
+        }
 
         if horizontalAccuracy <= 5 {
             gpsStatus = "GPS excellent"
@@ -191,6 +268,60 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
 
         heading = value
         headingAccuracy = newHeading.headingAccuracy
+    }
+
+    private func bearingDegrees(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D
+    ) -> Double {
+        let lat1 = from.latitude * .pi / 180
+        let lat2 = to.latitude * .pi / 180
+        let deltaLon =
+            (to.longitude - from.longitude) *
+            .pi / 180
+
+        let y = sin(deltaLon) * cos(lat2)
+        let x =
+            cos(lat1) * sin(lat2) -
+            sin(lat1) * cos(lat2) * cos(deltaLon)
+
+        var degrees = atan2(y, x) * 180 / .pi
+
+        if degrees < 0 {
+            degrees += 360
+        }
+
+        return degrees
+    }
+
+    private func circularBlend(
+        from: Double,
+        to: Double,
+        alpha: Double
+    ) -> Double {
+        var difference =
+            (to - from).truncatingRemainder(
+                dividingBy: 360
+            )
+
+        if difference > 180 {
+            difference -= 360
+        }
+
+        if difference < -180 {
+            difference += 360
+        }
+
+        var result = from + difference * alpha
+        result = result.truncatingRemainder(
+            dividingBy: 360
+        )
+
+        if result < 0 {
+            result += 360
+        }
+
+        return result
     }
 
     func locationManagerDidChangeAuthorization(
