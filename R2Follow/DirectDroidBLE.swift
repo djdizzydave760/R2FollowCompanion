@@ -14,6 +14,11 @@ struct DirectDroidDevice: Identifiable, Hashable {
 
 @MainActor
 final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+    private struct DroidSoundRef: Hashable {
+        let bank: Int
+        let track: Int
+    }
+
     static let serviceUUID = CBUUID(string: "09B600A0-3E42-41FC-B474-E9C0C8F0C801")
     static let notifyUUID = CBUUID(string: "09B600B0-3E42-41FC-B474-E9C0C8F0C801")
     static let commandUUID = CBUUID(string: "09B600B1-3E42-41FC-B474-E9C0C8F0C801")
@@ -40,6 +45,9 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
     private var rssiTimer: Timer?
     private var actionGeneration = 0
     private var ambientGeneration = 0
+    private var shuffledSoundDeck: [DroidSoundRef] = []
+    private var lastPlayedSound: DroidSoundRef?
+    @Published private(set) var lastSoundLabel = "None"
 
     override init() {
         super.init()
@@ -416,17 +424,104 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         sendMulti(id: 0, data: Data([command, parameter]))
     }
 
-    func chirp(bank: Int = 1) {
-        let trackCounts = [1: 4, 2: 4, 3: 3, 4: 1, 5: 1, 6: 4, 7: 5, 8: 1, 9: 1, 11: 2, 12: 2]
-        let safeBank = trackCounts[bank] == nil ? 1 : bank
-        let bankIndex = UInt8(max(0, safeBank - 1))
-        let trackCount = max(1, trackCounts[safeBank] ?? 1)
-        let trackIndex = UInt8(Int.random(in: 0..<trackCount))
+    private let soundTrackCounts: [Int: Int] = [
+        1: 4,   // General
+        2: 4,   // Droid Depot
+        3: 3,   // Resistance
+        4: 1,   // Unknown / special
+        5: 1,   // Droid Detector
+        6: 4,   // Dok-Ondar
+        7: 5,   // First Order
+        8: 1,   // Initial Activation
+        9: 1,   // Motor / movement sound
+        11: 2,  // Blaster accessory sounds
+        12: 2   // Thruster accessory sounds
+    ]
+
+    var totalBuiltInSoundCount: Int {
+        soundTrackCounts.values.reduce(0, +)
+    }
+
+    func playBuiltInSound(bank: Int, track: Int) {
+        guard let count = soundTrackCounts[bank],
+              track >= 0,
+              track < count else {
+            return
+        }
+
+        let bankIndex = UInt8(bank - 1)
+        let trackIndex = UInt8(track)
 
         audioCommand(31, parameter: bankIndex)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in
-            self?.audioCommand(24, parameter: trackIndex)
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + 0.06
+        ) { [weak self] in
+            guard let self else { return }
+            self.audioCommand(24, parameter: trackIndex)
+            self.lastSoundLabel = "Bank \(bank) • Track \(track + 1)"
         }
+    }
+
+    func chirp(bank: Int = 1) {
+        let safeBank = soundTrackCounts[bank] == nil ? 1 : bank
+        let count = max(1, soundTrackCounts[safeBank] ?? 1)
+        playBuiltInSound(
+            bank: safeBank,
+            track: Int.random(in: 0..<count)
+        )
+    }
+
+    func playNextShuffledBuiltInSound() {
+        guard isConnected else { return }
+
+        if shuffledSoundDeck.isEmpty {
+            var deck: [DroidSoundRef] = []
+
+            for bank in soundTrackCounts.keys.sorted() {
+                let count = soundTrackCounts[bank] ?? 0
+                for track in 0..<count {
+                    deck.append(
+                        DroidSoundRef(
+                            bank: bank,
+                            track: track
+                        )
+                    )
+                }
+            }
+
+            deck.shuffle()
+
+            // Avoid the first sound of a new cycle being the same as the last
+            // sound of the previous cycle.
+            if let lastPlayedSound,
+               deck.count > 1,
+               deck.last == lastPlayedSound {
+
+                deck.swapAt(
+                    deck.count - 1,
+                    deck.count - 2
+                )
+            }
+
+            shuffledSoundDeck = deck
+        }
+
+        guard let next = shuffledSoundDeck.popLast() else {
+            return
+        }
+
+        lastPlayedSound = next
+        playBuiltInSound(
+            bank: next.bank,
+            track: next.track
+        )
+    }
+
+    func expressiveRandomBuiltInSound() {
+        guard isConnected else { return }
+        playNextShuffledBuiltInSound()
+        expressiveHeadAndLights()
     }
 
     func expressiveHeadAndLights() {
@@ -489,7 +584,7 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         ambientGeneration += 1
         let generation = ambientGeneration
 
-        chirp(bank: 1)
+        playNextShuffledBuiltInSound()
         setAllHeadLEDs(on: true)
         domeLeft(speed: 120)
 
