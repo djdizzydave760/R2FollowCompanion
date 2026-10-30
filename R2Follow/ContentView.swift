@@ -216,6 +216,40 @@ struct ContentView: View {
                 Text("R2 can turn his dome, chirp, react to voice commands and blink his lights, but all wheel/drive commands are blocked.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Toggle(
+                    "Locked-screen External/JBL Audio",
+                    isOn: Binding(
+                        get: { model.externalAudioEnabled },
+                        set: { model.setExternalAudioEnabled($0) }
+                    )
+                )
+                .tint(.cyan)
+
+                metric(
+                    "Audio route",
+                    model.externalAudio.routeDescription
+                )
+
+                Text(
+                    model.externalAudioEnabled
+                        ? "This plays original droid-style sounds from the iPhone. If a JBL speaker is paired and selected as the iPhone audio output, the sounds route to the JBL and the background audio session helps Backpack Mode stay active while the screen is black."
+                        : "With external audio off, R2 uses his internal sounds. iOS may suspend random personality timers while the phone is completely idle and locked."
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+
+                Button {
+                    model.testExternalSpeaker()
+                } label: {
+                    Label(
+                        "Test JBL / Phone Sound + Head + LEDs",
+                        systemImage: "speaker.wave.3.fill"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.directBLE.isConnected)
             } else {
                 Label(
                     "HYBRID FOLLOW • GPS path + motion + Bluetooth spacing",
