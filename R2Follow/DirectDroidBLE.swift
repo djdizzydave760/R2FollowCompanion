@@ -350,6 +350,19 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         audioCommand(command, parameter: 4)
     }
 
+    func followLightPulse() {
+        guard isConnected else { return }
+
+        // Briefly sequence the three R-Series head LEDs, then leave them on.
+        audioCommand(72, parameter: 1)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) { [weak self] in
+            self?.audioCommand(72, parameter: 2)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) { [weak self] in
+            self?.audioCommand(72, parameter: 4)
+        }
+    }
+
     func executeScript(_ scriptID: Int) {
         guard scriptID > 0, scriptID != 13 else { return }
         sendCommand(id: 12, data: Data([bcd(scriptID), bcd(2)]))
