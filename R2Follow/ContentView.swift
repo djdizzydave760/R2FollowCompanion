@@ -19,7 +19,10 @@ struct ContentView: View {
                         connectionCard
                     }
 
-                    setupCard
+                    if model.connectionMode == .macBridge || model.directFollow.turnCorrectionEnabled {
+                        setupCard
+                    }
+
                     voiceCard
                     followCard
                     telemetryCard
