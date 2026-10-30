@@ -15,6 +15,7 @@ final class DirectShadowFollowController: ObservableObject {
     @Published private(set) var headingError = 0.0
     @Published private(set) var queuedDistance = 0.0
     @Published var personalityEnabled = true
+    @Published var turnCorrectionEnabled = true
 
     // Live calibration controls. These can be adjusted from the iPhone before Follow.
     @Published var shadowDelay = 0.35
@@ -59,6 +60,7 @@ final class DirectShadowFollowController: ObservableObject {
         headingSmoothing = 0.22
         maxDrivePulse = 0.32
         maxTurnPulse = 0.22
+        turnCorrectionEnabled = true
     }
 
     func setReferenceHeading(_ heading: Double) {
@@ -150,6 +152,7 @@ final class DirectShadowFollowController: ObservableObject {
         // is actually moving. This prevents pocket compass wobble from making R2
         // spin in circles while standing still.
         let hasMeaningfulTurn =
+            turnCorrectionEnabled &&
             moving &&
             headingUsable &&
             headingChange >= turnDeadbandDegrees
@@ -218,7 +221,7 @@ final class DirectShadowFollowController: ObservableObject {
 
         // Drive first when heading is already reasonably close. Only pivot when
         // the error is outside the deadband. This dramatically reduces circling.
-        if abs(difference) >= turnDeadbandDegrees {
+        if turnCorrectionEnabled && abs(difference) >= turnDeadbandDegrees {
             performTurn(difference)
             return
         }
