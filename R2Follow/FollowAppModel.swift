@@ -9,6 +9,24 @@ enum ConnectionMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+
+enum R2OperationMode: String, CaseIterable, Identifiable {
+    case hybridFollow = "Hybrid Follow"
+    case backpack = "Backpack"
+
+    var id: String { rawValue }
+}
+
+enum R2PersonalityMode: String, CaseIterable, Identifiable {
+    case relaxed = "Relaxed"
+    case excited = "Excited"
+    case patrol = "On Patrol"
+    case curious = "Curious"
+    case quiet = "Quiet"
+
+    var id: String { rawValue }
+}
+
 @MainActor
 final class FollowAppModel: ObservableObject {
     @Published var macHost: String {
@@ -25,6 +43,20 @@ final class FollowAppModel: ObservableObject {
 
     @Published var connectionMode: ConnectionMode {
         didSet { UserDefaults.standard.set(connectionMode.rawValue, forKey: "connectionMode") }
+    }
+
+    @Published var operationMode: R2OperationMode {
+        didSet {
+            UserDefaults.standard.set(operationMode.rawValue, forKey: "operationMode")
+            applyOperationMode()
+        }
+    }
+
+    @Published var personalityMode: R2PersonalityMode {
+        didSet {
+            UserDefaults.standard.set(personalityMode.rawValue, forKey: "personalityMode")
+            resetPersonalitySchedule()
+        }
     }
 
     @Published var calibratedHeading: Double?
@@ -54,6 +86,12 @@ final class FollowAppModel: ObservableObject {
 
         let storedMode = UserDefaults.standard.string(forKey: "connectionMode")
         connectionMode = ConnectionMode(rawValue: storedMode ?? "") ?? .directBluetooth
+
+        let storedOperation = UserDefaults.standard.string(forKey: "operationMode")
+        operationMode = R2OperationMode(rawValue: storedOperation ?? "") ?? .hybridFollow
+
+        let storedPersonality = UserDefaults.standard.string(forKey: "personalityMode")
+        personalityMode = R2PersonalityMode(rawValue: storedPersonality ?? "") ?? .relaxed
 
         syncBridgeSettings()
 
@@ -92,6 +130,7 @@ final class FollowAppModel: ObservableObject {
         }
 
         beginDroidLifeLoop()
+        applyOperationMode()
     }
 
     func syncBridgeSettings() {
@@ -102,6 +141,39 @@ final class FollowAppModel: ObservableObject {
 
     func requestPermissions() {
         motion.requestPermissions()
+    }
+
+    // MARK: - R2 operation mode
+
+    private func applyOperationMode() {
+        switch operationMode {
+        case .hybridFollow:
+            directBLE.setDriveLocked(false)
+            if !isFollowing {
+                status = "Hybrid Follow mode • wheels enabled"
+            }
+
+        case .backpack:
+            sendTimer?.invalidate()
+            sendTimer = nil
+            motion.stopTracking()
+            directFollow.stop(reason: "Backpack mode")
+            directBLE.setDriveLocked(true)
+            isFollowing = false
+            UIApplication.shared.isIdleTimerDisabled = false
+            status = "BACKPACK MODE • wheel motors locked • dome/audio/lights only"
+        }
+    }
+
+    private func resetPersonalitySchedule() {
+        let now = Date()
+        nextIdleBlink = now.addingTimeInterval(0.4)
+        nextIdleHead = now.addingTimeInterval(0.8)
+        nextIdleChirp = now.addingTimeInterval(1.5)
+    }
+
+    private func randomDelay(_ range: ClosedRange<Double>) -> TimeInterval {
+        Double.random(in: range)
     }
 
     // MARK: - Direct Bluetooth
@@ -144,35 +216,106 @@ final class FollowAppModel: ObservableObject {
 
     private func beginDroidLifeLoop() {
         lifeTimer?.invalidate()
-        nextIdleBlink = Date().addingTimeInterval(0.8)
-        nextIdleHead = Date().addingTimeInterval(2.0)
-        nextIdleChirp = Date().addingTimeInterval(4.0)
+        resetPersonalitySchedule()
 
-        lifeTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: true) { [weak self] _ in
+        lifeTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.30,
+            repeats: true
+        ) { [weak self] _ in
             guard let self else { return }
 
             Task { @MainActor in
                 guard self.connectionMode == .directBluetooth,
                       self.directBLE.isConnected,
-                      !self.isFollowing else {
+                      self.directFollow.personalityEnabled else {
                     return
                 }
 
                 let now = Date()
 
+                let blinkRange: ClosedRange<Double>
+                let headRange: ClosedRange<Double>
+                let chirpRange: ClosedRange<Double>
+                let soundBank: Int?
+                let doubleHeadChance: Int
+
+                switch self.personalityMode {
+                case .relaxed:
+                    blinkRange = 1.2...2.8
+                    headRange = 4.0...7.0
+                    chirpRange = 8.0...14.0
+                    soundBank = 1
+                    doubleHeadChance = 7
+
+                case .excited:
+                    blinkRange = 0.35...1.0
+                    headRange = 1.2...2.7
+                    chirpRange = 2.8...5.0
+                    soundBank = 1
+                    doubleHeadChance = 2
+
+                case .patrol:
+                    blinkRange = 0.7...1.7
+                    headRange = 1.5...3.2
+                    chirpRange = 4.5...7.5
+                    soundBank = 7
+                    doubleHeadChance = 3
+
+                case .curious:
+                    blinkRange = 0.8...2.0
+                    headRange = 2.0...4.0
+                    chirpRange = 5.0...9.0
+                    soundBank = 1
+                    doubleHeadChance = 2
+
+                case .quiet:
+                    blinkRange = 2.0...4.5
+                    headRange = 5.0...9.0
+                    chirpRange = 18.0...28.0
+                    soundBank = nil
+                    doubleHeadChance = 9
+                }
+
                 if now >= self.nextIdleBlink {
                     self.directBLE.naturalFollowBlink()
-                    self.nextIdleBlink = now.addingTimeInterval(Double.random(in: 0.7...2.2))
+                    self.nextIdleBlink =
+                        now.addingTimeInterval(
+                            self.randomDelay(blinkRange)
+                        )
                 }
 
                 if now >= self.nextIdleHead {
                     self.directBLE.ambientDomeGlance()
-                    self.nextIdleHead = now.addingTimeInterval(Double.random(in: 2.5...5.5))
+
+                    if Int.random(in: 0...doubleHeadChance) == 0 {
+                        DispatchQueue.main.asyncAfter(
+                            deadline: .now() + 0.85
+                        ) { [weak self] in
+                            guard let self,
+                                  self.directBLE.isConnected else {
+                                return
+                            }
+                            self.directBLE.ambientDomeGlance()
+                        }
+                    }
+
+                    self.nextIdleHead =
+                        now.addingTimeInterval(
+                            self.randomDelay(headRange)
+                        )
                 }
 
                 if now >= self.nextIdleChirp {
-                    self.directBLE.expressiveChirp(bank: 1)
-                    self.nextIdleChirp = now.addingTimeInterval(Double.random(in: 5.0...10.0))
+                    if let soundBank {
+                        self.directBLE.expressiveChirp(
+                            bank: soundBank
+                        )
+                    }
+
+                    self.nextIdleChirp =
+                        now.addingTimeInterval(
+                            self.randomDelay(chirpRange)
+                        )
                 }
             }
         }
@@ -204,7 +347,7 @@ final class FollowAppModel: ObservableObject {
 
         directFollow.calibrateTwoFootStop(usingRSSI: value)
         status = String(
-            format: "2-FOOT STOP SET • %.0f dBm • keep phone position consistent",
+            format: "3.5-FT TARGET SET • %.0f dBm • Bluetooth is the close-range brake",
             value
         )
         UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -320,6 +463,11 @@ final class FollowAppModel: ObservableObject {
         }
 
         if command == .follow {
+            guard operationMode == .hybridFollow else {
+                status = "Backpack Mode is active • wheel motors are locked"
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                return
+            }
             await startFollow()
             return
         }
@@ -328,6 +476,30 @@ final class FollowAppModel: ObservableObject {
             status = "Voice command heard, but Direct Bluetooth is not connected to R2"
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
             return
+        }
+
+        if operationMode == .backpack {
+            switch command {
+            case .turnLeft, .turnRight, .spinLeft, .spinRight, .dance, .follow:
+                status = "BACKPACK MODE • wheel movement command blocked"
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                return
+
+            case .excited:
+                directBLE.expressiveChirp(bank: 1)
+                directBLE.ambientDomeGlance()
+                status = "VOICE • excited backpack response"
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                return
+
+            case .resistance, .firstOrder, .droidDepot:
+                status = "BACKPACK MODE • scripted park response blocked because it may move the wheels"
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                return
+
+            default:
+                break
+            }
         }
 
         if isFollowing {
@@ -353,7 +525,7 @@ final class FollowAppModel: ObservableObject {
 
         switch command {
         case .speak:
-            directBLE.chirp()
+            directBLE.expressiveChirp()
         case .think:
             directBLE.scanArea()
         case .hello:
@@ -505,6 +677,11 @@ final class FollowAppModel: ObservableObject {
 
         switch connectionMode {
         case .directBluetooth:
+            guard operationMode == .hybridFollow else {
+                status = "Backpack Mode is active • wheel motors are locked"
+                return
+            }
+
             guard directBLE.isConnected else {
                 motion.stopTracking()
                 status = "Connect directly to R2 over Bluetooth first"
@@ -513,24 +690,16 @@ final class FollowAppModel: ObservableObject {
 
             guard directFollow.twoFootRSSI != nil else {
                 motion.stopTracking()
-                status = "Set the 2-foot Bluetooth stop distance before starting Follow"
+                status = "Place the phone about 3.5 ft from R2 and set the target gap first"
                 return
             }
 
-            let directHeading: Double
-            if directFollow.turnCorrectionEnabled {
-                guard let calibratedHeading else {
-                    status = "Align R2 + iPhone before using experimental turn correction"
-                    return
-                }
-                motion.startTracking()
-                directHeading = calibratedHeading
-            } else {
-                // Pure BLE proximity mode needs no compass or pedometer.
-                directHeading = 0
-            }
+            directBLE.setDriveLocked(false)
+            motion.startTracking()
 
-            directFollow.start(initialHeading: directHeading)
+            // Hybrid Follow learns the walking direction from the first good
+            // GPS course. No pocket compass alignment is required.
+            directFollow.start(initialHeading: 0)
             guard directFollow.isActive else {
                 motion.stopTracking()
                 status = "Could not start Direct Bluetooth Follow"
@@ -539,7 +708,7 @@ final class FollowAppModel: ObservableObject {
 
             isFollowing = true
             UIApplication.shared.isIdleTimerDisabled = true
-            status = "DIRECT FOLLOWING • iPhone → Bluetooth → R2"
+            status = "HYBRID FOLLOW • GPS path + motion + Bluetooth gap"
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             beginTelemetryLoop()
 
@@ -673,16 +842,17 @@ final class FollowAppModel: ObservableObject {
 
             directFollow.accept(
                 totalDistanceMeters: motion.totalDistance,
-                headingDegrees: motion.heading,
-                headingAccuracy: motion.headingAccuracy,
+                gpsCourseDegrees: motion.course,
+                gpsCourseValid: motion.gpsCourseUsable,
                 moving: motion.moving
             )
 
             status = String(
-                format: "DIRECT • %@ • %.2fm • %.0f°",
+                format: "HYBRID • %@ • %@ • %.2fm • RSSI %.0f",
                 directFollow.state,
+                directFollow.trackingQuality,
                 motion.totalDistance,
-                motion.heading
+                directBLE.smoothedRSSI
             )
             return
         }
