@@ -217,6 +217,17 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Button {
+                    model.requestPermissions()
+                } label: {
+                    Label(
+                        "Enable Locked-Screen Backpack Activity",
+                        systemImage: "iphone.and.arrow.forward"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
                 Toggle(
                     "Locked-screen External/JBL Audio",
                     isOn: Binding(
