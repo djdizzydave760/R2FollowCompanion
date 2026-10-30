@@ -478,7 +478,7 @@ final class R2ExternalAudioEngine: NSObject, ObservableObject, AVAudioPlayerDele
             }
 
         importedSoundCount = importedURLs.count
-        importedSoundNames = importedURLs.map(.lastPathComponent)
+        importedSoundNames = importedURLs.map { $0.lastPathComponent }
         shuffledDeck.removeAll()
     }
 
