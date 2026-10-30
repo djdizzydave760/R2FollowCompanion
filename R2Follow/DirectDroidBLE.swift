@@ -350,17 +350,38 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         audioCommand(command, parameter: 4)
     }
 
-    func followLightPulse() {
+    func naturalFollowBlink() {
         guard isConnected else { return }
 
-        // Briefly sequence the three R-Series head LEDs, then leave them on.
-        audioCommand(72, parameter: 1)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) { [weak self] in
-            self?.audioCommand(72, parameter: 2)
+        // Natural-looking independent head-light blink. Most of the time one LED
+        // blinks; occasionally two blink together. All lights return to ON.
+        let leds: [UInt8] = [1, 2, 4]
+        let first = leds.randomElement() ?? 2
+        let second = leds.filter { $0 != first }.randomElement()
+        let useSecond = Bool.random() && second != nil
+
+        audioCommand(73, parameter: first)
+
+        if useSecond, let second {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.035) { [weak self] in
+                self?.audioCommand(73, parameter: second)
+            }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) { [weak self] in
-            self?.audioCommand(72, parameter: 4)
+
+        let firstDelay = Double.random(in: 0.08...0.22)
+        DispatchQueue.main.asyncAfter(deadline: .now() + firstDelay) { [weak self] in
+            self?.audioCommand(72, parameter: first)
         }
+
+        if useSecond, let second {
+            DispatchQueue.main.asyncAfter(deadline: .now() + firstDelay + 0.05) { [weak self] in
+                self?.audioCommand(72, parameter: second)
+            }
+        }
+    }
+
+    func followLightPulse() {
+        naturalFollowBlink()
     }
 
     func executeScript(_ scriptID: Int) {
@@ -388,6 +409,34 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
             guard let self, self.isConnected, self.actionGeneration == generation else { return }
             work()
         }
+    }
+
+    func calibrationForwardPulse(speed: UInt8 = 78, duration: TimeInterval = 0.22) {
+        let generation = beginTimedAction()
+        forward(speed: speed)
+        schedule(after: max(0.08, min(0.60, duration)), generation: generation) { [weak self] in
+            self?.stopDrive()
+        }
+    }
+
+    func calibrationTurnLeftPulse(speed: UInt8 = 60, duration: TimeInterval = 0.16) {
+        let generation = beginTimedAction()
+        rotateLeft(speed: speed)
+        schedule(after: max(0.06, min(0.45, duration)), generation: generation) { [weak self] in
+            self?.stopDrive()
+        }
+    }
+
+    func calibrationTurnRightPulse(speed: UInt8 = 60, duration: TimeInterval = 0.16) {
+        let generation = beginTimedAction()
+        rotateRight(speed: speed)
+        schedule(after: max(0.06, min(0.45, duration)), generation: generation) { [weak self] in
+            self?.stopDrive()
+        }
+    }
+
+    func calibrationStop() {
+        emergencyStop()
     }
 
     func turnLeftPulse() {
