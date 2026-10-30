@@ -371,6 +371,64 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         }
     }
 
+    func expressiveChirp(bank: Int = 1) {
+        guard isConnected else { return }
+
+        ambientGeneration += 1
+        let generation = ambientGeneration
+        let lookLeftFirst = Bool.random()
+
+        // Start the sound and dome movement together so R2 visibly "talks"
+        // with his head instead of chirping while motionless.
+        chirp(bank: bank)
+        naturalFollowBlink()
+
+        if lookLeftFirst {
+            domeLeft(speed: 105)
+        } else {
+            domeRight(speed: 105)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) { [weak self] in
+            guard let self, self.isConnected, self.ambientGeneration == generation else { return }
+
+            if lookLeftFirst {
+                self.domeRight(speed: 88)
+            } else {
+                self.domeLeft(speed: 88)
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.64) { [weak self] in
+            guard let self, self.isConnected, self.ambientGeneration == generation else { return }
+            self.stopDome()
+            self.centerDome(speed: 175)
+        }
+    }
+
+    func testHeadAndVoice() {
+        guard isConnected else { return }
+
+        ambientGeneration += 1
+        let generation = ambientGeneration
+
+        chirp(bank: 1)
+        setAllHeadLEDs(on: true)
+        domeLeft(speed: 120)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
+            guard let self, self.isConnected, self.ambientGeneration == generation else { return }
+            self.domeRight(speed: 120)
+            self.naturalFollowBlink()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.10) { [weak self] in
+            guard let self, self.isConnected, self.ambientGeneration == generation else { return }
+            self.stopDome()
+            self.centerDome(speed: 190)
+        }
+    }
+
     func setAllHeadLEDs(on: Bool) {
         let command: UInt8 = on ? 72 : 73
         audioCommand(command, parameter: 1)
@@ -384,20 +442,34 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
         ambientGeneration += 1
         let generation = ambientGeneration
         let goLeft = Bool.random()
+        let speed = UInt8(Int.random(in: 78...108))
+        let firstDuration = Double.random(in: 0.34...0.62)
 
         if goLeft {
-            domeLeft(speed: UInt8(Int.random(in: 45...68)))
+            domeLeft(speed: speed)
         } else {
-            domeRight(speed: UInt8(Int.random(in: 45...68)))
+            domeRight(speed: speed)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.22...0.42)) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + firstDuration) { [weak self] in
             guard let self, self.isConnected, self.ambientGeneration == generation else { return }
             self.stopDome()
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.10...0.28)) { [weak self] in
-                guard let self, self.isConnected, self.ambientGeneration == generation else { return }
-                self.centerDome(speed: 130)
+            // Sometimes make a second curious glance before centering.
+            if Bool.random() {
+                if goLeft {
+                    self.domeRight(speed: UInt8(Int.random(in: 62...88)))
+                } else {
+                    self.domeLeft(speed: UInt8(Int.random(in: 62...88)))
+                }
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) { [weak self] in
+                    guard let self, self.isConnected, self.ambientGeneration == generation else { return }
+                    self.stopDome()
+                    self.centerDome(speed: 165)
+                }
+            } else {
+                self.centerDome(speed: 165)
             }
         }
     }
@@ -565,15 +637,7 @@ final class DirectDroidBLE: NSObject, ObservableObject, CBCentralManagerDelegate
     }
 
     func greeting() {
-        let generation = beginTimedAction()
-        chirp(bank: 1)
-        domeRight(speed: 65)
-        schedule(after: 0.28, generation: generation) { [weak self] in
-            self?.domeLeft(speed: 65)
-        }
-        schedule(after: 0.62, generation: generation) { [weak self] in
-            self?.centerDome()
-        }
+        expressiveChirp(bank: 1)
     }
 
     func sleepReaction() {
