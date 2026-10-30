@@ -1,9 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject var model: FollowAppModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var showAdvancedFollow = false
+    @State private var showSoundPackImporter = false
 
     var body: some View {
         NavigationStack {
@@ -60,6 +62,19 @@ struct ContentView: View {
                 } else if phase == .active {
                     model.appDidBecomeActive()
                 }
+            }
+        }
+        .fileImporter(
+            isPresented: $showSoundPackImporter,
+            allowedContentTypes: [.audio],
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                model.importExternalSoundFiles(urls)
+            case .failure(let error):
+                model.status =
+                    "Sound pack import failed: \(error.localizedDescription)"
             }
         }
     }
@@ -229,7 +244,7 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
 
                 Toggle(
-                    "Locked-screen External/JBL Audio",
+                    "Use Imported Sound Pack on JBL",
                     isOn: Binding(
                         get: { model.externalAudioEnabled },
                         set: { model.setExternalAudioEnabled($0) }
@@ -298,18 +313,76 @@ struct ContentView: View {
                 }
 
                 Text(
-                    model.externalAudioEnabled
-                        ? "This plays original droid-style sounds from the iPhone. If a JBL speaker is paired and selected as the iPhone audio output, the sounds route to the JBL and the background audio session helps Backpack Mode stay active while the screen is black."
-                        : "With external audio off, R2 uses his internal sounds. iOS may suspend random personality timers while the phone is completely idle and locked."
+                    model.externalAudio.hasImportedSoundPack
+                        ? "JBL mode now uses your imported sound files only. The pack is shuffled so every file plays once before any sound repeats, while R2's dome and LEDs animate in sync."
+                        : "No JBL sound pack is loaded. R2 will use his real built-in Droid Depot sounds in a no-repeat shuffle. Import WAV, MP3, M4A, AAC, AIFF or CAF files if you want those sounds routed through the JBL."
                 )
                 .font(.caption)
                 .foregroundStyle(.orange)
+
+                metric(
+                    "Imported sound pack",
+                    "\(model.externalAudio.importedSoundCount) files"
+                )
+
+                metric(
+                    "Last JBL sound",
+                    model.externalAudio.lastPackSound
+                )
+
+                metric(
+                    "Last R2 built-in sound",
+                    model.directBLE.lastSoundLabel
+                )
+
+                metric(
+                    "R2 built-in library",
+                    "\(model.directBLE.totalBuiltInSoundCount) shuffled tracks"
+                )
+
+                Button {
+                    showSoundPackImporter = true
+                } label: {
+                    Label(
+                        model.externalAudio.hasImportedSoundPack
+                            ? "Add More Sound Files"
+                            : "Import R2 Sound Pack",
+                        systemImage: "folder.badge.plus"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+
+                if model.externalAudio.hasImportedSoundPack {
+                    HStack {
+                        Button {
+                            model.testExternalSoundPack()
+                        } label: {
+                            Label(
+                                "Play Next Pack Sound",
+                                systemImage: "play.fill"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button(role: .destructive) {
+                            model.clearExternalSoundPack()
+                        } label: {
+                            Label(
+                                "Clear Pack",
+                                systemImage: "trash"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
 
                 Button {
                     model.testExternalSpeaker()
                 } label: {
                     Label(
-                        "LOUD JBL TEST + Head + LEDs",
+                        "Test JBL Audio Route + Head + LEDs",
                         systemImage: "speaker.wave.3.fill"
                     )
                     .frame(maxWidth: .infinity)
