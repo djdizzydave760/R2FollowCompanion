@@ -24,7 +24,119 @@ jobs:
           unzip -oq /tmp/R2SoundBatch.zip -d R2Follow/Resources/SoundBatch
 
           mkdir -p R2Follow/Assets.xcassets/AppIcon.appiconset
-          cat BuildAssets/AppIcon.part*.b64 | tr -d '\n' | base64 --decode > R2Follow/Assets.xcassets/AppIcon.appiconset/AppIcon1024.png
+          python3 - <<'PY'
+          import struct, zlib, math
+          from pathlib import Path
+
+          W = H = 1024
+          px = bytearray(W * H * 3)
+
+          def setpx(x, y, rgb):
+              if 0 <= x < W and 0 <= y < H:
+                  i = (y * W + x) * 3
+                  px[i:i+3] = bytes(rgb)
+
+          def blend(x, y, rgb, a):
+              if 0 <= x < W and 0 <= y < H:
+                  i = (y * W + x) * 3
+                  for k in range(3):
+                      px[i+k] = int(px[i+k] * (1-a) + rgb[k] * a)
+
+          # Dark navy radial/vertical background.
+          for y in range(H):
+              for x in range(W):
+                  dx = (x - 512) / 724
+                  dy = (y - 430) / 724
+                  glow = max(0.0, 1.0 - math.sqrt(dx*dx + dy*dy))
+                  v = y / H
+                  setpx(x, y, (
+                      int(5 + 4*glow),
+                      int(13 + 18*glow),
+                      int(25 + 30*glow + 4*(1-v))
+                  ))
+
+          # Cyan radio halo.
+          for r, a in [(360, .16), (300, .11), (245, .08)]:
+              rr = r*r
+              for y in range(max(0,512-r-10), min(H,512+r+10)):
+                  for x in range(max(0,512-r-10), min(W,512+r+10)):
+                      d = abs((x-512)*(x-512)+(y-500)*(y-500)-rr)
+                      if d < r*4:
+                          blend(x,y,(37,217,255), a*(1-d/(r*4)))
+
+          def fill_ellipse(cx, cy, rx, ry, color):
+              for y in range(int(cy-ry), int(cy+ry)+1):
+                  yy=((y-cy)/ry)**2
+                  if yy>1: continue
+                  span=rx*math.sqrt(1-yy)
+                  for x in range(int(cx-span), int(cx+span)+1):
+                      setpx(x,y,color)
+
+          def fill_rect(x0,y0,x1,y1,color):
+              for y in range(max(0,y0),min(H,y1)):
+                  i=(y*W+max(0,x0))*3
+                  for x in range(max(0,x0),min(W,x1)):
+                      px[i:i+3]=bytes(color); i+=3
+
+          # Droid body + dome.
+          fill_rect(330, 505, 694, 800, (235,242,247))
+          fill_ellipse(512, 505, 182, 185, (239,246,250))
+          # crop lower dome overlap visually with body
+          fill_rect(330, 505, 694, 540, (239,246,250))
+
+          # Blue panels.
+          fill_rect(357, 560, 413, 740, (18,104,190))
+          fill_rect(611, 560, 667, 740, (18,104,190))
+          fill_rect(454, 625, 570, 722, (17,86,168))
+          fill_rect(385, 460, 445, 510, (18,104,190))
+          fill_rect(578, 460, 638, 510, (18,104,190))
+
+          # Dome blue band.
+          for y in range(435, 490):
+              yy=((y-505)/185)**2
+              if yy>1: continue
+              span=182*math.sqrt(1-yy)
+              x0=int(512-span); x1=int(512+span)
+              for x in range(x0,x1+1):
+                  setpx(x,y,(17,96,181))
+
+          # Cyan lens glow and lens.
+          for r in range(75, 15, -1):
+              a=(75-r)/75*0.03 + 0.01
+              fill_ellipse(512, 470, r, r, (
+                  int(10+70*a), int(80+150*a), int(130+120*a)
+              ))
+          fill_ellipse(512,470,44,44,(10,27,44))
+          fill_ellipse(512,470,29,29,(24,219,255))
+          fill_ellipse(500,458,9,9,(220,252,255))
+
+          # Small red status light.
+          fill_ellipse(590, 430, 14, 14, (230,48,55))
+          fill_ellipse(586, 426, 5, 5, (255,180,170))
+
+          # Feet / side legs.
+          fill_rect(292, 690, 348, 828, (221,232,239))
+          fill_rect(676, 690, 732, 828, (221,232,239))
+          fill_rect(278, 807, 360, 852, (216,228,236))
+          fill_rect(664, 807, 746, 852, (216,228,236))
+
+          # Build PNG from raw RGB rows.
+          raw = bytearray()
+          for y in range(H):
+              raw.append(0)
+              raw.extend(px[y*W*3:(y+1)*W*3])
+
+          def chunk(kind, data):
+              return (struct.pack(">I", len(data)) + kind + data +
+                      struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff))
+
+          png = b"\x89PNG\r\n\x1a\n"
+          png += chunk(b"IHDR", struct.pack(">IIBBBBB", W,H,8,2,0,0,0))
+          png += chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+          png += chunk(b"IEND", b"")
+
+          Path("R2Follow/Assets.xcassets/AppIcon.appiconset/AppIcon1024.png").write_bytes(png)
+          PY
 
           cat > R2Follow/Assets.xcassets/Contents.json <<'JSON'
           {
@@ -71,6 +183,19 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             build
+
+      - name: Verify bundled assets
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release-iphoneos/R2 Follow.app"
+          test -d "$APP"
+
+          COUNT=$(find "$APP" -type f \( -name '*.m4a' -o -name '*.mp3' \) | wc -l | tr -d ' ')
+          echo "Bundled audio files: $COUNT"
+          test "$COUNT" -ge 25
+
+          find "$APP" -type f -name 'SoundBatchManifest.json' -print -quit | grep -q .
+          find "$APP" -type f -iname '*AppIcon*.png' -print -quit | grep -q .
 
       - name: Package unsigned IPA for Sideloadly
         run: |
