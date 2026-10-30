@@ -278,11 +278,14 @@ struct ContentView: View {
         card("FOLLOW CONTROL", icon: "figure.walk.motion") {
             if model.connectionMode == .directBluetooth {
                 Label(
-                    "Direct Bluetooth • no Wi-Fi required",
+                    "Close Follow • ~0.75 sec trail • faster catch-up",
                     systemImage: "bolt.horizontal.circle.fill"
                 )
                 .font(.caption)
                 .foregroundStyle(.green)
+
+                Toggle("R2 talks + lights while following", isOn: $model.directFollow.personalityEnabled)
+                    .tint(.cyan)
             }
 
             if model.isFollowing {
