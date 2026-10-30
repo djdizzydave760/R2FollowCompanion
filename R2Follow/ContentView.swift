@@ -57,6 +57,8 @@ struct ContentView: View {
             .onChange(of: scenePhase) { phase in
                 if phase == .background {
                     model.appDidEnterBackground()
+                } else if phase == .active {
+                    model.appDidBecomeActive()
                 }
             }
         }
@@ -513,7 +515,7 @@ struct ContentView: View {
         card("FOLLOW CONTROL", icon: "figure.walk.motion") {
             if model.connectionMode == .directBluetooth {
                 Label(
-                    "Hybrid Follow • GPS breadcrumbs • ~3–4 ft Bluetooth brake",
+                    "Hybrid Follow • faster start • GPS breadcrumbs • ~3–4 ft Bluetooth brake",
                     systemImage: "bolt.horizontal.circle.fill"
                 )
                 .font(.caption)
