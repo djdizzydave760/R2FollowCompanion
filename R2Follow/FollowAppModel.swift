@@ -134,6 +134,79 @@ final class FollowAppModel: ObservableObject {
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
     }
 
+    // MARK: - R2 pre-follow calibration
+
+    func markR2AlignedWithPhone() {
+        guard connectionMode == .directBluetooth else {
+            calibrate()
+            return
+        }
+
+        guard directBLE.isConnected else {
+            status = "Connect R2 over Bluetooth before calibrating"
+            return
+        }
+
+        guard motion.headingAccuracy >= 0 else {
+            status = "Waiting for a valid compass heading"
+            return
+        }
+
+        calibratedHeading = motion.heading
+        directFollow.setReferenceHeading(motion.heading)
+        status = "R2 aligned • \(Int(motion.heading.rounded()))° • test forward next"
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    func testR2Forward() {
+        guard connectionMode == .directBluetooth, directBLE.isConnected, !isFollowing else {
+            status = "Connect R2 directly and stop Follow before testing"
+            return
+        }
+
+        directBLE.calibrationForwardPulse(
+            speed: UInt8(clamping: Int(directFollow.driveSpeed)),
+            duration: 0.20
+        )
+        status = "CALIBRATION • short forward pulse"
+    }
+
+    func testR2TurnLeft() {
+        guard connectionMode == .directBluetooth, directBLE.isConnected, !isFollowing else {
+            status = "Connect R2 directly and stop Follow before testing"
+            return
+        }
+
+        directBLE.calibrationTurnLeftPulse(
+            speed: UInt8(clamping: Int(directFollow.turnSpeed)),
+            duration: 0.14
+        )
+        status = "CALIBRATION • small left turn"
+    }
+
+    func testR2TurnRight() {
+        guard connectionMode == .directBluetooth, directBLE.isConnected, !isFollowing else {
+            status = "Connect R2 directly and stop Follow before testing"
+            return
+        }
+
+        directBLE.calibrationTurnRightPulse(
+            speed: UInt8(clamping: Int(directFollow.turnSpeed)),
+            duration: 0.14
+        )
+        status = "CALIBRATION • small right turn"
+    }
+
+    func stopR2CalibrationMotion() {
+        directBLE.calibrationStop()
+        status = "CALIBRATION STOP"
+    }
+
+    func resetFollowCalibration() {
+        directFollow.resetRecommendedCalibration()
+        status = "Recommended Follow calibration restored"
+    }
+
     // MARK: - Voice
 
     func startVoiceCommands() async {
@@ -486,7 +559,7 @@ final class FollowAppModel: ObservableObject {
 
     private func beginTelemetryLoop() {
         sendTimer?.invalidate()
-        let interval = connectionMode == .directBluetooth ? 0.20 : 0.45
+        let interval = connectionMode == .directBluetooth ? 0.12 : 0.45
         sendTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard let self, self.isFollowing else { return }
             Task { @MainActor in
@@ -506,7 +579,9 @@ final class FollowAppModel: ObservableObject {
 
             directFollow.accept(
                 totalDistanceMeters: motion.totalDistance,
-                headingDegrees: motion.heading
+                headingDegrees: motion.heading,
+                headingAccuracy: motion.headingAccuracy,
+                moving: motion.moving
             )
 
             status = String(
