@@ -486,7 +486,8 @@ final class FollowAppModel: ObservableObject {
 
     private func beginTelemetryLoop() {
         sendTimer?.invalidate()
-        sendTimer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] _ in
+        let interval = connectionMode == .directBluetooth ? 0.20 : 0.45
+        sendTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard let self, self.isFollowing else { return }
             Task { @MainActor in
                 await self.sendTelemetry()
