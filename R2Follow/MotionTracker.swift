@@ -92,6 +92,21 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
         permissionMessage = "Requested GPS + motion + compass access"
     }
 
+    func startBackgroundFollowSession() {
+        // This must only be enabled while a user-started Follow session is active.
+        // The app declares UIBackgroundModes/location in Info.plist.
+        location.allowsBackgroundLocationUpdates = true
+        location.showsBackgroundLocationIndicator = true
+        location.pausesLocationUpdatesAutomatically = false
+        location.startUpdatingLocation()
+        gpsStatus = "Background GPS active"
+    }
+
+    func stopBackgroundFollowSession() {
+        location.allowsBackgroundLocationUpdates = false
+        location.showsBackgroundLocationIndicator = false
+    }
+
     func startTracking() {
         totalDistance = 0
         moving = false
@@ -165,6 +180,7 @@ final class MotionTracker: NSObject, ObservableObject, CLLocationManagerDelegate
     func stopTracking() {
         pedometer.stopUpdates()
         motion.stopDeviceMotionUpdates()
+        stopBackgroundFollowSession()
         location.stopUpdatingLocation()
         moving = false
     }
