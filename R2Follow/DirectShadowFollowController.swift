@@ -30,7 +30,7 @@ final class DirectShadowFollowController: ObservableObject {
 
     // Live tuning controls.
     @Published var shadowDelay = 0.18
-    @Published var trailDistanceMeters = 1.05
+    @Published var trailDistanceMeters = 0.35
     @Published var driveSpeed = 88.0
     @Published var turnSpeed = 60.0
     @Published var minimumDistanceMeters = 0.05
@@ -64,7 +64,7 @@ final class DirectShadowFollowController: ObservableObject {
 
     func resetRecommendedCalibration() {
         shadowDelay = 0.18
-        trailDistanceMeters = 1.05
+        trailDistanceMeters = 0.35
         driveSpeed = 88
         turnSpeed = 60
         minimumDistanceMeters = 0.05
@@ -224,7 +224,7 @@ final class DirectShadowFollowController: ObservableObject {
 
         if hasForwardProgress || hasMeaningfulTurn {
             let releaseDistance =
-                total + max(0.60, trailDistanceMeters)
+                total + max(0.20, trailDistanceMeters)
 
             queue.append(
                 Segment(
@@ -484,7 +484,10 @@ final class DirectShadowFollowController: ObservableObject {
             return false
         }
 
-        return current >= targetRSSI - 1.2
+        // Only brake when the phone is clearly CLOSER than the calibrated
+        // 3–4 ft target. Do not hold at the exact calibration point, otherwise
+        // Follow can appear dead until RSSI changes by several dB.
+        return current >= targetRSSI + 2.0
     }
 
     private func isClearlyOutsideStopDistance() -> Bool {
@@ -497,7 +500,8 @@ final class DirectShadowFollowController: ObservableObject {
             return true
         }
 
-        return current <= targetRSSI - 4.0
+        // Resume promptly once the phone is clearly moving away again.
+        return current <= targetRSSI - 1.5
     }
 
     private func circularBlend(
