@@ -206,6 +206,14 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .disabled(!model.directBLE.isConnected)
 
+            Toggle("Turn correction enabled", isOn: $model.directFollow.turnCorrectionEnabled)
+                .tint(.cyan)
+                .disabled(model.isFollowing)
+
+            Text("For the first calibration run, you can turn this OFF and walk straight. If R2 follows straight correctly, turn it back ON and tune turning separately.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Divider()
 
             calibrationSlider(
@@ -445,6 +453,9 @@ struct ContentView: View {
 
             if model.connectionMode == .directBluetooth {
                 metric("Direct Follow", model.directFollow.state)
+                metric("Filtered turn", String(format: "%.0f°", model.directFollow.filteredHeading))
+                metric("Heading error", String(format: "%.0f°", model.directFollow.headingError))
+                metric("Drive queued", String(format: "%.2f m", model.directFollow.queuedDistance))
             }
 
             Text(model.motion.permissionMessage)
