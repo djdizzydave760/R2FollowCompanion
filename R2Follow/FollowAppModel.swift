@@ -171,7 +171,7 @@ final class FollowAppModel: ObservableObject {
                 }
 
                 if now >= self.nextIdleChirp {
-                    self.directBLE.chirp(bank: 1)
+                    self.directBLE.expressiveChirp(bank: 1)
                     self.nextIdleChirp = now.addingTimeInterval(Double.random(in: 5.0...10.0))
                 }
             }
@@ -179,6 +179,16 @@ final class FollowAppModel: ObservableObject {
     }
 
     // MARK: - R2 pre-follow calibration
+
+    func testR2HeadAndVoice() {
+        guard connectionMode == .directBluetooth, directBLE.isConnected else {
+            status = "Connect R2 directly over Bluetooth first"
+            return
+        }
+
+        directBLE.testHeadAndVoice()
+        status = "TEST • R2 should chirp, turn head left/right, then center"
+    }
 
     func calibrateTwoFootStop() {
         guard connectionMode == .directBluetooth, directBLE.isConnected else {
@@ -323,7 +333,7 @@ final class FollowAppModel: ObservableObject {
         if isFollowing {
             switch command {
             case .speak:
-                directBLE.chirp()
+                directBLE.expressiveChirp()
                 status = "VOICE • R2 speak"
             case .lightsOn:
                 directBLE.setAllHeadLEDs(on: true)
@@ -350,11 +360,11 @@ final class FollowAppModel: ObservableObject {
             directBLE.greeting()
         case .happy:
             directBLE.setAllHeadLEDs(on: true)
-            directBLE.chirp(bank: 1)
+            directBLE.expressiveChirp(bank: 1)
         case .excited:
             directBLE.dance()
         case .alert:
-            directBLE.chirp(bank: 7)
+            directBLE.expressiveChirp(bank: 7)
         case .sleep:
             directBLE.sleepReaction()
         case .wake:
