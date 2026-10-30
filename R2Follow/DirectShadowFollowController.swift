@@ -17,16 +17,16 @@ final class DirectShadowFollowController: ObservableObject {
     @Published var personalityEnabled = true
 
     // Live calibration controls. These can be adjusted from the iPhone before Follow.
-    @Published var shadowDelay = 0.45
-    @Published var driveSpeed = 88.0
+    @Published var shadowDelay = 0.35
+    @Published var driveSpeed = 92.0
     @Published var turnSpeed = 66.0
-    @Published var minimumDistanceMeters = 0.05
-    @Published var secondsPerMeter = 2.45
+    @Published var minimumDistanceMeters = 0.04
+    @Published var secondsPerMeter = 3.10
     @Published var turnDegreesPerSecond = 92.0
     @Published var turnDeadbandDegrees = 18.0
     @Published var maxHeadingAccuracy = 35.0
     @Published var headingSmoothing = 0.22
-    @Published var maxDrivePulse = 0.26
+    @Published var maxDrivePulse = 0.32
     @Published var maxTurnPulse = 0.22
 
     private let droid: DirectDroidBLE
@@ -48,16 +48,16 @@ final class DirectShadowFollowController: ObservableObject {
     }
 
     func resetRecommendedCalibration() {
-        shadowDelay = 0.45
-        driveSpeed = 88
+        shadowDelay = 0.35
+        driveSpeed = 92
         turnSpeed = 66
-        minimumDistanceMeters = 0.05
-        secondsPerMeter = 2.45
+        minimumDistanceMeters = 0.04
+        secondsPerMeter = 3.10
         turnDegreesPerSecond = 92
         turnDeadbandDegrees = 18
         maxHeadingAccuracy = 35
         headingSmoothing = 0.22
-        maxDrivePulse = 0.26
+        maxDrivePulse = 0.32
         maxTurnPulse = 0.22
     }
 
