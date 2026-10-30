@@ -21,6 +21,7 @@ jobs:
 
           mkdir -p R2Follow/Resources/SoundBatch
           cat BuildAssets/SoundBatch.part*.b64 | tr -d '\n' | base64 --decode > /tmp/R2SoundBatch.zip
+          echo "c72a658b057354ddbb9f388e2ea5a5be6322e01eaf04264e3973aa2007f84400  /tmp/R2SoundBatch.zip" | shasum -a 256 -c -
           unzip -oq /tmp/R2SoundBatch.zip -d R2Follow/Resources/SoundBatch
 
           mkdir -p R2Follow/Assets.xcassets/AppIcon.appiconset
