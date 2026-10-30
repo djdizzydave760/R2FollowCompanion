@@ -842,8 +842,8 @@ final class FollowAppModel: ObservableObject {
 
             directFollow.accept(
                 totalDistanceMeters: motion.totalDistance,
-                gpsCourseDegrees: motion.course,
-                gpsCourseValid: motion.gpsCourseUsable,
+                gpsCourseDegrees: motion.bestPathCourse,
+                gpsCourseValid: motion.bestPathCourseUsable,
                 moving: motion.moving
             )
 
